@@ -1,0 +1,71 @@
+"""FastAPI 앱 구성 + lifespan(세션 TTL 스위퍼) (main §2, §5)."""
+from __future__ import annotations
+
+import asyncio
+import logging
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+from fastapi import FastAPI
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+
+from app.config import get_settings
+from app.routes import http as http_routes
+from app.routes import ws as ws_routes
+from app.services.factory import build_providers
+from app.session import SessionStore
+
+STATIC_DIR = Path(__file__).parent / "static"
+log = logging.getLogger("app")
+
+
+async def _sweep_loop(app: FastAPI) -> None:
+    while True:
+        await asyncio.sleep(600)
+        try:
+            n = await app.state.store.sweep()
+            if n:
+                log.info("swept %d expired session(s)", n)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # 스위퍼는 절대 앱을 죽이지 않음
+            log.warning("sweep error: %s", exc)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    s = get_settings()
+    logging.basicConfig(
+        level=getattr(logging, s.log_level.upper(), logging.INFO),
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+    app.state.settings = s
+    app.state.store = SessionStore(ttl_min=s.session_ttl_min)
+    app.state.providers = build_providers(s)
+    sweeper = asyncio.create_task(_sweep_loop(app))
+    log.info("돌봄콜 AI 시작 — http://%s:%s", s.app_host, s.app_port)
+    try:
+        yield
+    finally:
+        sweeper.cancel()
+        try:
+            await sweeper
+        except asyncio.CancelledError:
+            pass
+
+
+def create_app() -> FastAPI:
+    app = FastAPI(title="돌봄콜 AI", lifespan=lifespan)
+    app.include_router(http_routes.router)
+    app.include_router(ws_routes.router)
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+    @app.get("/", include_in_schema=False)
+    async def index() -> FileResponse:
+        return FileResponse(str(STATIC_DIR / "index.html"))
+
+    return app
+
+
+app = create_app()
