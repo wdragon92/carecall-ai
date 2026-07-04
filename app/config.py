@@ -33,7 +33,8 @@ class Settings(BaseSettings):
     # 앱 파라미터
     app_host: str = "127.0.0.1"
     app_port: int = 8000
-    clova_llm_model: str = "HCX-007"
+    clova_llm_model: str = "HCX-007"   # 분석(추출/리포트)용 — reasoning
+    clova_chat_model: str = "HCX-005"  # 채팅용 — 빠른 스트리밍
     clova_tts_voice: str = "vmikyung"
     max_upload_mb: int = 5
     session_ttl_min: int = 120

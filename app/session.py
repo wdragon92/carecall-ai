@@ -38,9 +38,10 @@ class Session:
     def touch(self) -> None:
         self.last_active = time.monotonic()
 
-    def add_message(self, role: str, text: str, via: str = "text") -> Message:
+    def add_message(self, role: str, text: str, via: str = "text", id: str | None = None) -> Message:
         self._mcount += 1
-        msg = Message(id=f"m{self._mcount}-{secrets.token_hex(3)}", role=role, text=text, via=via)
+        mid = id or f"m{self._mcount}-{secrets.token_hex(3)}"
+        msg = Message(id=mid, role=role, text=text, via=via)
         self.messages.append(msg)
         self.touch()
         return msg
