@@ -43,16 +43,22 @@ def by_ids(ids: list[str]) -> list[dict]:
     return out
 
 
-def match(signals: list[str], text: str) -> list[dict]:
-    """추출 신호 + 사용자 발화 키워드로 복지 항목 매칭. LLM 없이 동작하는 결정적 규칙."""
+def match(signals: list[str], text: str, limit: int = 5) -> list[dict]:
+    """추출 신호 + 사용자 발화 키워드로 복지 항목 매칭 후 관련도 상위 N개.
+    키워드 매칭(구체적)을 신호 매칭(광범위)보다 높게 가중해 targeted하게 추린다."""
     items = load_items()
     if not items:
         return []
-    sigset = {s for s in signals}
-    matched: list[dict] = []
+    sigset = set(signals or [])
+    scored: list[tuple[int, object]] = []
     for it in items:
-        hit_signal = bool(sigset & set(it.signals))
-        hit_kw = any(kw and kw in text for kw in it.키워드)
-        if hit_signal or hit_kw:
-            matched.append({"id": it.id, "이름": it.이름, "한줄": it.한줄, "신청처": it.신청처})
-    return matched
+        kw = sum(1 for k in it.키워드 if k and k in text)
+        sg = len(sigset & set(it.signals))
+        score = kw * 3 + sg
+        if score > 0:
+            scored.append((score, it))
+    scored.sort(key=lambda x: -x[0])
+    return [
+        {"id": it.id, "이름": it.이름, "한줄": it.한줄, "신청처": it.신청처}
+        for _, it in scored[:limit]
+    ]

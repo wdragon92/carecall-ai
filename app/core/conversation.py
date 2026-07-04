@@ -71,7 +71,7 @@ async def greet(sess) -> None:
 async def handle_turn(sess, providers, settings) -> None:
     system = prompts.chat_system(welfare.get_digest())
     messages = [{"role": "system", "content": system}] + sess.history_for_llm()
-    await _stream(sess, providers, messages, max_tokens=300)
+    await _stream(sess, providers, messages, max_tokens=220)
     _spawn_extract(sess, providers)  # 비동기 추출
 
 

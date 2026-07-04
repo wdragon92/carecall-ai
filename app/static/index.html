@@ -1,7 +1,103 @@
-<!-- stage 0 placeholder — stage 1/7에서 실제 채팅 UI로 교체됨 -->
-<div style="font-family: system-ui, sans-serif; max-width: 640px; margin: 60px auto; padding: 0 20px;">
-  <h1>🌼 돌봄콜 AI</h1>
-  <p>서버가 실행 중입니다. (stage 0 골격)</p>
-  <pre id="health" style="background:#f4f4f5;padding:16px;border-radius:8px;">/health 확인 중…</pre>
-</div>
-<script src="/static/app.js"></script>
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>돌봄콜 AI — 안부 상담</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* Tailwind CDN 실패해도 최소 레이아웃 유지 */
+    html, body { height: 100%; margin: 0; }
+    body { font-family: "Malgun Gothic", system-ui, sans-serif; font-size: 18px; background: #f6f7f9; color: #1f2937; }
+    #app { display: flex; flex-direction: column; height: 100dvh; }
+    .bubble { max-width: 85%; padding: 14px 16px; border-radius: 18px; line-height: 1.6; font-size: 19px; white-space: pre-wrap; word-break: break-word; }
+    .bubble-ai { background: #fff; border: 1px solid #e5e7eb; border-bottom-left-radius: 4px; }
+    .bubble-user { background: #2563eb; color: #fff; border-bottom-right-radius: 4px; }
+    .card { border-radius: 14px; padding: 12px 14px; border: 1px solid #e5e7eb; background: #fff; }
+    .sev-낮음 { border-left: 6px solid #16a34a; }
+    .sev-보통 { border-left: 6px solid #d97706; }
+    .sev-높음 { border-left: 6px solid #dc2626; }
+    button { touch-action: manipulation; }
+    .btn { min-height: 52px; min-width: 52px; border-radius: 14px; font-size: 18px; font-weight: 600; }
+    .blink { animation: blink 1s steps(2, start) infinite; }
+    @keyframes blink { to { visibility: hidden; } }
+    .newcard { animation: pop .5s ease; }
+    @keyframes pop { from { transform: scale(.96); background: #fef9c3; } to { transform: scale(1); } }
+    ::-webkit-scrollbar { width: 10px; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 8px; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <!-- 헤더 -->
+    <header class="flex items-center justify-between px-4 py-3 bg-white border-b shadow-sm">
+      <div class="flex items-center gap-2">
+        <span class="text-2xl">🌼</span>
+        <div>
+          <div class="font-bold text-lg leading-tight">돌봄콜 AI</div>
+          <div id="mode-badge" class="text-xs text-gray-400">연결 중…</div>
+        </div>
+      </div>
+      <div class="flex items-center gap-2">
+        <button id="btn-voice" class="btn px-3 bg-gray-100 hover:bg-gray-200" aria-pressed="true" title="음성 켜기/끄기">🔊 음성</button>
+        <button id="btn-end" class="btn px-3 bg-rose-100 text-rose-700 hover:bg-rose-200">상담 마치기</button>
+      </div>
+    </header>
+
+    <!-- 긴급 배너 -->
+    <div id="urgent-banner" class="hidden bg-red-600 text-white text-center px-4 py-3 font-bold" role="alert"></div>
+
+    <!-- 본문 -->
+    <main class="flex-1 flex overflow-hidden">
+      <!-- 채팅 영역 -->
+      <section id="chat-pane" class="flex-1 flex flex-col min-w-0">
+        <div id="chat-log" class="flex-1 overflow-y-auto px-4 py-4 space-y-3" aria-live="polite" aria-label="상담 대화"></div>
+        <!-- 입력바 -->
+        <div class="border-t bg-white p-3">
+          <div class="flex items-end gap-2">
+            <button id="btn-mic" class="btn px-3 bg-gray-100 hover:bg-gray-200 shrink-0" title="누르고 말하기">🎤</button>
+            <button id="btn-attach" class="btn px-3 bg-gray-100 hover:bg-gray-200 shrink-0" title="사진 첨부">📎</button>
+            <input id="file-input" type="file" accept="image/*" class="hidden" />
+            <textarea id="text-input" rows="1" placeholder="이곳에 입력하거나 🎤을 누르고 말씀하세요"
+              class="flex-1 resize-none border rounded-2xl px-4 py-3 text-lg focus:outline-none focus:ring-2 focus:ring-blue-400" style="max-height:120px;"></textarea>
+            <button id="btn-send" class="btn px-4 bg-blue-600 text-white hover:bg-blue-700 shrink-0">보내기</button>
+          </div>
+          <div id="mic-hint" class="hidden text-center text-red-600 font-semibold mt-2">🔴 녹음 중… (버튼에서 손을 떼면 전송)</div>
+        </div>
+      </section>
+
+      <!-- 사이드 패널 -->
+      <aside id="panel-pane" class="hidden md:flex w-80 lg:w-96 flex-col border-l bg-gray-50">
+        <div class="flex border-b bg-white">
+          <button data-tab="findings" class="tab-btn flex-1 py-3 font-semibold border-b-2 border-blue-600 text-blue-600">특이사항</button>
+          <button data-tab="welfare" class="tab-btn flex-1 py-3 font-semibold border-b-2 border-transparent text-gray-500">복지 안내</button>
+        </div>
+        <div id="tab-findings" class="flex-1 overflow-y-auto p-3 space-y-2">
+          <p class="text-gray-400 text-center mt-8 text-sm">대화가 진행되면<br>특이사항이 여기에 정리됩니다.</p>
+        </div>
+        <div id="tab-welfare" class="hidden flex-1 overflow-y-auto p-3 space-y-2">
+          <p class="text-gray-400 text-center mt-8 text-sm">자격이 맞는 복지가<br>여기에 안내됩니다.</p>
+        </div>
+      </aside>
+    </main>
+
+    <!-- 모바일 하단 탭 -->
+    <nav id="mobile-tabs" class="md:hidden flex border-t bg-white">
+      <button data-mview="chat" class="mview-btn flex-1 py-3 font-semibold text-blue-600">💬 대화</button>
+      <button data-mview="panel" class="mview-btn flex-1 py-3 font-semibold text-gray-500">📋 기록 <span id="mobile-badge" class="hidden ml-1 text-xs bg-red-500 text-white rounded-full px-2">!</span></button>
+    </nav>
+  </div>
+
+  <!-- 리포트 모달 -->
+  <div id="report-modal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+    <div class="bg-white rounded-2xl max-w-lg w-full max-h-[85vh] overflow-y-auto p-6">
+      <h2 class="text-2xl font-bold mb-1">상담 요약 리포트</h2>
+      <p class="text-xs text-gray-400 mb-4">※ 참고용이며 의학적 진단이 아닙니다.</p>
+      <div id="report-body" class="space-y-4"></div>
+      <button id="btn-close-report" class="btn w-full mt-6 bg-blue-600 text-white">닫기</button>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
