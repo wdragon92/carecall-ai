@@ -1,0 +1,18 @@
+[Unit]
+Description=Care-Call AI (FastAPI/uvicorn)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/carecall
+# .env 는 pydantic-settings 가 WorkingDirectory 기준으로 읽음 (APP_HOST=0.0.0.0, APP_PORT=8080)
+ExecStart=/opt/carecall/.venv/bin/python run.py
+Restart=always
+RestartSec=3
+# 대화/이미지 비영구 원칙: 임시파일 격리
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

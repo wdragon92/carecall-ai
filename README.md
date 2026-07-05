@@ -71,8 +71,17 @@ python run.py                 # → http://127.0.0.1:8080
 프라이버시(대화/이미지 비영구, 세션 종료 시 폐기) · 위로하되 치료 아님 · 어르신 말투(존댓말·짧게·하나씩).
 구현 위치는 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §9 참고.
 
+## 공인 배포 (NCP 서버)
+공개 URL + 모바일 마이크(HTTPS)가 필요하면 NCP 서버로 배포한다. 자동화 자산은 [`deploy/`](deploy) 참고.
+- 런북(명령 모음): [deploy/DEPLOY.md](deploy/DEPLOY.md)
+- 서버 셋업 스크립트: [deploy/server_setup.sh](deploy/server_setup.sh) (systemd + Caddy 자동 HTTPS `<IP>.sslip.io`)
+- 배포 흐름: NCP 서버 생성 → 공인IP → 서버에서 `git clone` + `.env` 전송 → `server_setup.sh` → `https://<IP>.sslip.io`
+
+> ⚠️ **이 서브계정은 서버 작동 시간제한(평일 09–22시 / 주말 09–18시)** 이 있어, 그 밖 시간엔 서버 생성·기동이 막히고 자동 정지될 수 있다. **낮 시간 시연용**으로 운용한다.
+
 ## 문서
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — 실행 설계서(전체 구조·결정)
 - [docs/DEMO_SCENARIO.md](docs/DEMO_SCENARIO.md) — 발표용 시연 대본
-- [TEARDOWN.md](TEARDOWN.md) — 프로젝트 종료 시 철수 체크리스트
+- [deploy/DEPLOY.md](deploy/DEPLOY.md) — 공인 배포 런북
+- [TEARDOWN.md](TEARDOWN.md) — 종료 시 철수 체크리스트(로컬 + NCP 인프라)
 - [care-call-ai-claude-code-prompt.md](care-call-ai-claude-code-prompt.md) — 원본 요구사항

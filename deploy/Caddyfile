@@ -1,0 +1,6 @@
+# Caddy 리버스 프록시 — <공인IP>.sslip.io 로 자동 HTTPS (Let's Encrypt).
+# server_setup.sh 가 아래 도메인을 실제 공인IP로 치환해 /etc/caddy/Caddyfile 에 씀.
+# WebSocket 업그레이드는 Caddy가 자동 처리.
+{$CARECALL_DOMAIN} {
+    reverse_proxy 127.0.0.1:8080
+}
