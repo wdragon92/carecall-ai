@@ -3,7 +3,6 @@
 real 실패 시 mock 폴백. 모든 WS 전송은 sess.send()로 직렬화된다."""
 from __future__ import annotations
 
-import asyncio
 import logging
 import re
 from datetime import datetime
@@ -68,7 +67,7 @@ async def _speak(sess, providers, messages, max_tokens: int = 240, single: bool 
     await _typing(sess, True)
     full = ""
     try:
-        full = await providers.llm.chat(messages, max_tokens=max_tokens, temperature=0.55, top_p=0.8)
+        full = await providers.llm.chat(messages, max_tokens=max_tokens, temperature=0.6, top_p=0.8)
         if not full.strip():
             raise ProviderError("empty response")
     except Exception as exc:  # noqa: BLE001 — 어떤 실패든 mock으로 폴백(턴 크래시 방지)
@@ -77,22 +76,19 @@ async def _speak(sess, providers, messages, max_tokens: int = 240, single: bool 
             full = await providers.mllm.chat(messages, max_tokens=max_tokens)
         except Exception as exc2:  # noqa: BLE001
             log.error("mock chat failed too: %s", exc2)
-            full = "죄송해요, 지금 잠시 문제가 있었어요. 다시 한 번 말씀해 주시겠어요?"
+            full = "아이고, 제가 잠깐 딴생각을 했네요. 다시 한 번 말씀해 주시겠어요?"
 
     segs = [full.strip()] if single else _segments(full)
     if not segs:
-        segs = ["네, 말씀 듣고 있어요."]
+        segs = ["네, 듣고 있어요."]
 
-    await _typing(sess, False)
-    for i, seg in enumerate(segs):
-        if i > 0:
-            await _typing(sess, True)
-            await asyncio.sleep(min(1.1, 0.45 + len(seg) * 0.015))
-            await _typing(sess, False)
+    # 말풍선을 묶어서 한 번에 보냄. 노출 페이싱(TTS 재생에 맞춤)은 프론트가 담당.
+    bubbles = []
+    for seg in segs:
         msg = sess.add_message("assistant", seg)
-        await sess.send({"type": "ai_message_start", "id": msg.id})
-        await sess.send({"type": "ai_message_delta", "id": msg.id, "text": seg})
-        await sess.send({"type": "ai_message_end", "id": msg.id, "full_text": seg})
+        bubbles.append({"id": msg.id, "text": seg})
+    await _typing(sess, False)
+    await sess.send({"type": "ai_turn", "bubbles": bubbles})
     return full
 
 
@@ -107,9 +103,7 @@ def _spawn_extract(sess, providers) -> None:
 async def greet(sess) -> None:
     text = prompts.greeting(_period_now())
     msg = sess.add_message("assistant", text, via="system")
-    await sess.send({"type": "ai_message_start", "id": msg.id})
-    await sess.send({"type": "ai_message_delta", "id": msg.id, "text": text})
-    await sess.send({"type": "ai_message_end", "id": msg.id, "full_text": text})
+    await sess.send({"type": "ai_turn", "bubbles": [{"id": msg.id, "text": text}]})
 
 
 async def handle_turn(sess, providers, settings) -> None:

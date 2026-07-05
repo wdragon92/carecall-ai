@@ -7,9 +7,9 @@ const state = {
   sessionId: null,
   ws: null,
   voiceOn: true,
-  streams: {}, // messageId -> bubble element
   seenFindings: new Set(),
   audio: null,
+  _audioDone: null, // 현재 재생의 완료 resolver (인터럽트 시 호출)
   recording: false,
   reconnect: 0,
 };
@@ -32,7 +32,7 @@ function connectWS() {
   const ws = new WebSocket(`${proto}://${location.host}/ws/${state.sessionId}`);
   state.ws = ws;
   ws.onopen = () => (state.reconnect = 0);
-  ws.onmessage = (ev) => handleWS(JSON.parse(ev.data));
+  ws.onmessage = (ev) => { try { handleWS(JSON.parse(ev.data)); } catch (e) {} };
   ws.onclose = () => {
     if (state.reconnect < 3) {
       state.reconnect++;
@@ -54,16 +54,8 @@ function handleWS(m) {
     case "ai_typing":
       m.on ? showTyping() : hideTyping();
       break;
-    case "ai_message_start":
-      hideTyping();
-      startAiBubble(m.id);
-      break;
-    case "ai_message_delta":
-      appendDelta(m.id, m.text);
-      break;
-    case "ai_message_end":
-      endAiBubble(m.id, m.full_text);
-      if (state.voiceOn && m.full_text) enqueueTTS(m.id);
+    case "ai_turn":
+      revealTurn(m.bubbles || []);
       break;
     case "findings_update":
       renderFindings(m.findings);
@@ -122,29 +114,13 @@ function appendSystemNote(text) {
   scrollDown();
   return row;
 }
-function startAiBubble(id) {
+function appendAiBubble(text) {
   const row = rowFor("ai");
   const div = document.createElement("div");
   div.className = "bubble bubble-ai";
-  div.innerHTML = `<span class="txt"></span><span class="blink">▍</span>`;
+  div.textContent = text;
   row.appendChild(div);
   chatLog().appendChild(row);
-  state.streams[id] = div;
-  scrollDown();
-}
-function appendDelta(id, text) {
-  const div = state.streams[id];
-  if (!div) return;
-  div.querySelector(".txt").textContent += text;
-  scrollDown();
-}
-function endAiBubble(id, full) {
-  const div = state.streams[id];
-  if (!div) return;
-  div.querySelector(".txt").textContent = full || div.querySelector(".txt").textContent;
-  const cur = div.querySelector(".blink");
-  if (cur) cur.remove();
-  delete state.streams[id];
   scrollDown();
 }
 function showTyping() {
@@ -225,6 +201,8 @@ function showUrgent(msg, level) {
 function sendUserMessage(text, via = "text", opts = {}) {
   text = (text || "").trim();
   if (!text || !state.ws || state.ws.readyState !== 1) return;
+  _turn++;      // 진행 중이던 AI 말풍선 노출 중단
+  stopAudio();  // 재생 중이던 음성 중지
   if (!opts.noBubble) appendUserBubble(text);
   state.ws.send(JSON.stringify({ type: "user_message", text, via }));
 }
@@ -232,7 +210,6 @@ function sendFromInput() {
   const inp = $("#text-input");
   const t = inp.value.trim();
   if (!t) return;
-  if (state.audio) state.audio.pause();
   sendUserMessage(t, "text");
   inp.value = "";
   inp.style.height = "auto";
@@ -257,7 +234,7 @@ async function startRec() {
   }
   state.recPending = false;
   state.recording = true;
-  if (state.audio) state.audio.pause(); // 스피커(TTS) 소리가 녹음되지 않게
+  stopAudio(); // 재생 중이던 TTS 중지(녹음에 안 섞이게 + 노출 페이싱 해제)
   $("#mic-hint").classList.remove("hidden");
   const btn = $("#btn-mic");
   btn.classList.add("bg-red-200");
@@ -380,39 +357,73 @@ function downscaleImage(file, maxDim, quality) {
   });
 }
 
-/* ================= TTS 재생 (말풍선 순서대로 순차 재생 큐) ================= */
-function enqueueTTS(id) {
-  if (!state.voiceOn) return;
-  state.ttsChain = (state.ttsChain || Promise.resolve()).then(() => playTTSOnce(id)).catch(() => {});
+/* ============ 말풍선 노출 페이싱: TTS 재생이 끝나면 다음 말풍선을 띄운다 ============ */
+let _turn = 0; // 현재 턴 번호(새 턴/사용자 입력 시 증가 → 진행 중 노출 중단)
+const _sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+function _readingDelay(text) {
+  return Math.min(4500, 500 + text.length * 95); // 음성 off일 때 읽는 속도에 맞춘 간격
 }
-async function playTTSOnce(id) {
-  if (!state.voiceOn || state.recording) return; // 녹음 중엔 재생하지 않음
-
-  let blob;
+function stopAudio() {
+  if (state.audio) { try { state.audio.pause(); } catch (e) {} }
+  if (state._audioDone) { const done = state._audioDone; state._audioDone = null; done(); }
+}
+async function fetchTTS(id) {
   try {
     const r = await fetch(`/api/sessions/${state.sessionId}/tts`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message_id: id }),
     });
-    if (!r.ok) return;
-    blob = await r.blob();
+    return r.ok ? await r.blob() : null;
   } catch (e) {
-    return;
+    return null;
   }
-  if (!state.voiceOn) return;
-  await new Promise((resolve) => {
+}
+function playBlob(blob) {
+  return new Promise((resolve) => {
+    stopAudio();
+    let url;
     try {
-      if (state.audio) state.audio.pause();
-      const a = new Audio(URL.createObjectURL(blob));
+      url = URL.createObjectURL(blob);
+      const a = new Audio(url);
       state.audio = a;
-      a.onended = resolve;
-      a.onerror = resolve;
-      a.play().catch(() => resolve());
+      state._audioDone = () => {
+        state._audioDone = null;
+        try { URL.revokeObjectURL(url); } catch (e) {}
+        resolve();
+      };
+      a.onended = () => state._audioDone && state._audioDone();
+      a.onerror = () => state._audioDone && state._audioDone();
+      a.play().catch(() => state._audioDone && state._audioDone());
     } catch (e) {
+      if (url) { try { URL.revokeObjectURL(url); } catch (e2) {} }
       resolve();
     }
   });
+}
+async function revealTurn(bubbles) {
+  const myTurn = ++_turn;
+  stopAudio();
+  hideTyping();
+  const useVoice = state.voiceOn && !state.recording;
+  // 음성이면 이번 턴 말풍선들의 TTS를 미리 병렬 요청(말풍선 사이 끊김 방지)
+  const blobs = useVoice ? bubbles.map((b) => fetchTTS(b.id)) : [];
+  for (let i = 0; i < bubbles.length; i++) {
+    if (myTurn !== _turn) return; // 새 턴/입력으로 중단
+    showTyping();
+    await _sleep(Math.min(900, 280 + bubbles[i].text.length * 11)); // '입력 중' 짧은 뜸
+    if (myTurn !== _turn) { hideTyping(); return; }
+    hideTyping();
+    appendAiBubble(bubbles[i].text);
+    if (useVoice && state.voiceOn && !state.recording) {
+      const blob = await blobs[i];
+      if (myTurn !== _turn) return;
+      if (blob) await playBlob(blob); // 오디오가 끝나야 다음 말풍선 등장 → 음성에 맞춘 페이싱
+      else await _sleep(_readingDelay(bubbles[i].text));
+    } else {
+      await _sleep(_readingDelay(bubbles[i].text));
+    }
+  }
 }
 
 /* ================= 종료 리포트 ================= */
@@ -473,7 +484,7 @@ function toggleVoice() {
   btn.setAttribute("aria-pressed", String(state.voiceOn));
   btn.textContent = state.voiceOn ? "🔊 음성" : "🔇 음성";
   btn.classList.toggle("bg-blue-100", state.voiceOn);
-  if (!state.voiceOn && state.audio) state.audio.pause();
+  if (!state.voiceOn) stopAudio();
   state.ws?.send(JSON.stringify({ type: "set_voice", on: state.voiceOn }));
 }
 function switchTab(tab) {

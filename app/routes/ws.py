@@ -28,7 +28,8 @@ async def ws_endpoint(websocket: WebSocket, session_id: str) -> None:
 
     sess.ws = websocket
     await sess.send({"type": "session_ready", "session_id": session_id, "providers": providers.modes})
-    await conversation.greet(sess)
+    if not sess.messages:  # 재연결 시 인사 중복 방지
+        await conversation.greet(sess)
 
     try:
         while True:

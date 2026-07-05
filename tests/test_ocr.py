@@ -19,8 +19,8 @@ def test_ocr_flow_smishing(client):
         done, _ = _drain_until(ws, lambda m: m.get("type") == "ocr_status" and m.get("status") == "done")
         assert done is not None
 
-        expl, _ = _drain_until(ws, lambda m: m.get("type") == "ai_message_end")
-        assert expl is not None and expl["full_text"]
+        expl, _ = _drain_until(ws, lambda m: m.get("type") == "ai_turn")
+        assert expl is not None and expl["bubbles"] and expl["bubbles"][0]["text"]
 
         fu, _ = _drain_until(ws, lambda m: m.get("type") == "findings_update")
         assert fu is not None

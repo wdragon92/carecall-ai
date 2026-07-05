@@ -14,9 +14,8 @@ def test_tts_returns_audio(client):
     with client.websocket_connect(f"/ws/{sid}") as ws:
         for _ in range(8):
             m = ws.receive_json()
-            if m.get("type") == "ai_message_start":
-                mid = m["id"]
-            if m.get("type") == "ai_message_end":
+            if m.get("type") == "ai_turn":
+                mid = m["bubbles"][0]["id"]
                 break
     assert mid
     r = client.post(f"/api/sessions/{sid}/tts", json={"message_id": mid})
