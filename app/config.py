@@ -32,7 +32,7 @@ class Settings(BaseSettings):
 
     # 앱 파라미터
     app_host: str = "127.0.0.1"
-    app_port: int = 8000
+    app_port: int = 8080  # 8000은 Windows 예약대역(7902-8001)에 걸려 바인딩 실패할 수 있음
     clova_llm_model: str = "HCX-007"   # 분석(추출/리포트)용 — reasoning
     clova_chat_model: str = "HCX-005"  # 채팅용 — 빠른 스트리밍
     clova_tts_voice: str = "vmikyung"

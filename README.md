@@ -25,9 +25,9 @@ pip install -r requirements.txt
 Copy-Item .env.example .env   # 값 채우기
 
 # 3) 실행
-python run.py                 # → http://127.0.0.1:8000
+python run.py                 # → http://127.0.0.1:8080
 ```
-브라우저로 http://127.0.0.1:8000 접속. (마이크는 localhost 또는 https에서만 동작)
+브라우저로 http://127.0.0.1:8080 접속. (마이크는 localhost 또는 https에서만 동작)
 
 ## 동작 모드 (MOCK_MODE)
 `.env`의 `MOCK_MODE`로 제어합니다. **비용과 무관** — 키 없이도 데모가 돌아가게 하고, 테스트를 안정화하기 위한 스위치입니다.
