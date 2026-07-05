@@ -1,3 +1,29 @@
+def test_findings_preserved_when_llm_fails():
+    """LLM 추출이 실패해도 기존 특이사항이 사라지지 않아야 한다(누적 보존)."""
+    import asyncio
+
+    from app.core import extraction
+    from app.models import Finding
+    from app.session import Session
+
+    class _FailLLM:
+        async def extract_json(self, messages, schema):
+            raise RuntimeError("boom")
+
+    class _P:
+        llm = _FailLLM()
+        mllm = _FailLLM()
+
+    sess = Session("t")
+    sess.add_message("user", "그냥 이런저런 얘기예요")  # 안전망 미매칭 발화
+    sess.findings = [Finding(id="x", category="정서", content="외로움 표현", severity="보통")]
+
+    asyncio.run(extraction._run_once(sess, _P()))
+
+    cats = {f.category for f in sess.findings}
+    assert "정서" in cats  # 기존 findings 보존
+
+
 def _drain_until(ws, pred, max_msgs=90):
     seen = []
     for _ in range(max_msgs):

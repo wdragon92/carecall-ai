@@ -81,18 +81,22 @@ async def _run_once(sess, providers) -> None:
         {"role": "user", "content": transcript},
     ]
     data: dict = {}
+    llm_ok = False
     try:
         data = await providers.llm.extract_json(messages, prompts.EXTRACT_SCHEMA)
-    except ProviderError as exc:
+        llm_ok = True
+    except Exception as exc:  # noqa: BLE001
         log.warning("extract real failed (%s) → mock", exc)
         try:
             data = await providers.mllm.extract_json(messages, prompts.EXTRACT_SCHEMA)
-        except Exception as exc2:  # noqa: BLE001 — 실패해도 안전망 결과는 유지
+            llm_ok = True
+        except Exception as exc2:  # noqa: BLE001
             log.error("extract mock failed: %s", exc2)
             data = {}
 
     llm_findings = _parse_findings(data.get("findings") if isinstance(data, dict) else None)
-    findings = _merge(safety_findings, llm_findings)
+    # LLM 성공 → 안전망+LLM 으로 갱신 / 실패 → 기존 findings 보존(안전망만 반영, 누적 유지)
+    findings = _merge(safety_findings, llm_findings) if llm_ok else _merge(safety_findings, sess.findings)
     sess.findings = findings
     await sess.send({"type": "findings_update", "findings": [_dump(f) for f in findings]})
 

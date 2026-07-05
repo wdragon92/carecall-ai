@@ -33,4 +33,8 @@ class ClovaSTT:
             raise ProviderError(f"CSR error: {exc}") from exc
         if resp.status_code != 200:
             raise ProviderError(f"CSR {resp.status_code}: {resp.text[:200]}")
-        return (resp.json().get("text") or "").strip()
+        try:
+            data = resp.json()
+        except ValueError as exc:
+            raise ProviderError(f"CSR non-JSON response: {resp.text[:200]!r}") from exc
+        return ((data.get("text") if isinstance(data, dict) else "") or "").strip()

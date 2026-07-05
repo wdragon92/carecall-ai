@@ -61,7 +61,7 @@ async def generate_report(sess, providers) -> dict:
         if isinstance(data, dict):
             summary = (data.get("summary") or "").strip()
             recs = data.get("recommendations") or []
-    except ProviderError as exc:
+    except Exception as exc:  # noqa: BLE001 — 어떤 실패든 결정적 폴백 사용
         log.warning("report real failed (%s) → fallback", exc)
 
     if not summary:

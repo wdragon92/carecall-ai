@@ -18,6 +18,8 @@ _ALLOWED = {"jpg", "jpeg", "png", "pdf", "tif", "tiff"}
 
 
 def _reconstruct(data: dict) -> str:
+    if not isinstance(data, dict):
+        return ""
     images = data.get("images") or []
     if not images:
         return ""
@@ -59,4 +61,7 @@ class ClovaOCR:
             raise ProviderError(f"CLOVA OCR error: {exc}") from exc
         if resp.status_code != 200:
             raise ProviderError(f"CLOVA OCR {resp.status_code}: {resp.text[:300]}")
-        return _reconstruct(resp.json())
+        try:
+            return _reconstruct(resp.json())
+        except ValueError as exc:  # 200인데 본문이 JSON이 아님
+            raise ProviderError(f"CLOVA OCR non-JSON response: {resp.text[:200]!r}") from exc

@@ -95,7 +95,13 @@ class ClovaLLM:
             raise ProviderError(f"CLOVA LLM error: {exc}") from exc
         if resp.status_code != 200:
             raise ProviderError(f"CLOVA LLM {resp.status_code}: {resp.text[:300]}")
-        content = resp.json().get("result", {}).get("message", {}).get("content", "")
+        try:
+            data = resp.json()
+        except ValueError as exc:  # 200인데 본문이 JSON이 아님
+            raise ProviderError(f"CLOVA LLM non-JSON response: {resp.text[:200]!r}") from exc
+        content = ""
+        if isinstance(data, dict):
+            content = (data.get("result") or {}).get("message", {}).get("content", "") or ""
         if not content:
             raise ProviderError(f"CLOVA LLM empty response: {resp.text[:200]}")
         return content

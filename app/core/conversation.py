@@ -71,7 +71,7 @@ async def _speak(sess, providers, messages, max_tokens: int = 240, single: bool 
         full = await providers.llm.chat(messages, max_tokens=max_tokens, temperature=0.55, top_p=0.8)
         if not full.strip():
             raise ProviderError("empty response")
-    except ProviderError as exc:
+    except Exception as exc:  # noqa: BLE001 — 어떤 실패든 mock으로 폴백(턴 크래시 방지)
         log.warning("chat real failed (%s) → mock", exc)
         try:
             full = await providers.mllm.chat(messages, max_tokens=max_tokens)
@@ -126,7 +126,7 @@ async def handle_image(sess, providers, image_bytes: bytes, fmt: str, name: str,
     await sess.send({"type": "ocr_status", "upload_id": upload_id, "status": "processing"})
     try:
         ocr_text = await providers.ocr.extract_text(image_bytes, fmt, name)
-    except ProviderError as exc:
+    except Exception as exc:  # noqa: BLE001 — 어떤 실패든 mock으로 (OCR 상태가 '처리 중'에서 멈추지 않게)
         log.warning("ocr real failed (%s) → mock", exc)
         try:
             ocr_text = await providers.mocr.extract_text(image_bytes, fmt, name)
