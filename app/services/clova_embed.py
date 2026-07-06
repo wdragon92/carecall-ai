@@ -31,7 +31,7 @@ class ClovaEmbed:
     async def _embed_one(self, text: str) -> list[float]:
         url = f"{BASE}/v1/api-tools/embedding/v2"
         delay = 1.0
-        for _ in range(3):
+        for _ in range(6):  # 배치 빌드 중 QPM 창을 넘길 수 있게 최대 ~63초 백오프
             try:
                 resp = await self._client.post(url, headers=self._headers(), json={"text": text})
             except httpx.HTTPError as exc:

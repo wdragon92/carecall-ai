@@ -47,7 +47,7 @@ async def _main() -> int:
     if args.source in ("api", "all"):
         from app.rag import fetch
 
-        api = await fetch.api_cards(s)  # P0 전에는 명확한 안내와 함께 실패
+        api = await fetch.api_cards(s, progress=lambda m: print(f"[build_index] {m}"))
         print(f"[build_index] api: {len(api)} cards")
         chunks += api
     if args.source in ("pdf", "all"):
@@ -63,7 +63,9 @@ async def _main() -> int:
 
     embedder, mode = _pick_embedder(s)
     prev = None if args.force else load_index(data_dir)
-    loaded, st = await build_index(chunks, embedder.embed, prev, mode)
+    # 실 임베딩은 QPM 제한이 있어 호출 간격을 넉넉히 (429 백오프는 클라이언트가 추가 수행)
+    loaded, st = await build_index(chunks, embedder.embed, prev, mode,
+                                   sleep_s=0.4 if mode == "real" else 0.0)
     save_index(loaded, data_dir, st)
     print(
         f"[build_index] mode={mode} chunks={len(chunks)} dim={loaded.meta['dim']} | "

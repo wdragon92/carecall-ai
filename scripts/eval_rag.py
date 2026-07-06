@@ -16,21 +16,26 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-# (serv_id, 구어체 질문 — 어르신 말투, 서비스명 없이 의미로만)
+# (정답 서비스명 조각, 구어체 질문 — 어르신 말투, 서비스명 없이 의미로만)
+# 매칭은 공백 제거 후 '카드 서비스명이 조각을 포함'으로 판정 — fixture/실 API 카드 모두 커버
 IN_SET = [
-    ("fixture-basic-pension", "나라에서 나오는 노인 용돈 같은 거, 나는 언제부터 받을 수 있나"),
-    ("fixture-livelihood", "먹고살 돈이 없어서 끼니 걱정을 해"),
-    ("fixture-medical-aid", "병원비가 무서워서 아파도 병원엘 못 가겠어"),
-    ("fixture-housing-benefit", "월세 내기가 너무 버거워"),
-    ("fixture-emergency-aid", "갑자기 일을 못 하게 돼서 당장 살길이 막막해"),
-    ("fixture-care-service", "무릎이 아파서 장 보러 가기가 힘들어"),
-    ("fixture-energy-voucher", "겨울에 난방비가 무서워서 보일러를 못 틀어"),
-    ("fixture-safety-service", "혼자 있다가 쓰러지면 어쩌나 겁이 나"),
-    ("fixture-senior-job", "소일거리라도 해서 용돈이라도 벌고 싶은데"),
-    ("fixture-dementia-care", "자꾸 깜빡깜빡하는데 치매약 값이 부담돼"),
-    ("fixture-culture-card", "영화 구경이라도 가고 싶은데 돈이 아까워서"),
-    ("fixture-telecom-discount", "휴대폰 요금이 다달이 아까워"),
+    ("기초연금", "나라에서 나오는 노인 용돈 같은 거, 나는 언제부터 받을 수 있나"),
+    ("생계급여", "먹고살 돈이 없어서 끼니 걱정을 해"),
+    ("의료급여", "병원비가 무서워서 아파도 병원엘 못 가겠어"),
+    ("주거급여", "월세 내기가 너무 버거워"),
+    ("긴급복지", "갑자기 일을 못 하게 돼서 당장 살길이 막막해"),
+    ("노인맞춤돌봄", "무릎이 아파서 장 보러 가기가 힘들어"),
+    ("에너지바우처", "겨울에 난방비가 무서워서 보일러를 못 틀어"),
+    ("응급안전안심", "혼자 있다가 쓰러지면 어쩌나 겁이 나"),
+    ("노인일자리", "소일거리라도 해서 용돈이라도 벌고 싶은데"),
+    ("치매치료관리비", "자꾸 깜빡깜빡하는데 치매약 값이 부담돼"),
+    ("문화누리", "영화 구경이라도 가고 싶은데 돈이 아까워서"),
+    ("이동통신", "휴대폰 요금이 다달이 아까워"),
 ]
+
+
+def _norm(s: str) -> str:
+    return "".join((s or "").split())
 OUT_SET = [
     "오늘 날씨가 어때",
     "손주가 보고 싶네",
@@ -75,8 +80,8 @@ async def main() -> int:
     for gold, q in IN_SET:
         qv = (await embedder.embed([q]))[0]
         r = hybrid_retrieve(rt, qv, q, k=args.k, pool=s.rag_pool)
-        ids = [c.serv_id for c, _ in r.items]
-        rank = ids.index(gold) + 1 if gold in ids else 0
+        names = [_norm((c.fields or {}).get("서비스명", "")) for c, _ in r.items]
+        rank = next((i + 1 for i, n in enumerate(names) if _norm(gold) in n), 0)
         for k in hits:
             if rank and rank <= k:
                 hits[k] += 1

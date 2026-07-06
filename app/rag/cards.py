@@ -54,10 +54,63 @@ def fixture_cards(path: Path | None = None, collected_at: str | None = None) -> 
     return out
 
 
-def service_to_card(svc: dict, collected_at: str) -> DocChunk:
-    """공공데이터포털 서비스 1건 → 복지카드.
-    TODO(P0): knowledge/samples/central.json·local.json 확보 후 실제 필드명으로 작성.
-    (서비스명/지원대상/지원내용/신청방법/문의처/상세URL/서비스ID 매핑)"""
-    raise NotImplementedError(
-        "P0 대기: 샘플 응답(knowledge/samples/*.json) 확보 후 필드 매핑을 채우세요."
+def _clean(s: str, cap: int = 0) -> str:
+    out = " ".join((s or "").split())
+    return out[:cap].rstrip() if cap and len(out) > cap else out
+
+
+def service_to_card(svc: dict, scope: str, collected_at: str) -> DocChunk:
+    """실 API 응답(목록+상세 병합 dict) 1건 → 복지카드 (샘플: knowledge/samples/*.xml).
+    scope: 'central'(중앙부처) | 'local'(지자체). 필드명 출처는 이 함수와 fetch.py뿐."""
+    name = svc.get("servNm", "")
+    summary = svc.get("wlfareInfoOutlCn") or svc.get("servDgst", "")
+    target = svc.get("tgtrDtlCn") or svc.get("sprtTrgtCn", "")
+    crit = svc.get("slctCritCn", "")
+    benefit = svc.get("alwServCn", "")
+    apply_ = svc.get("_apply") or svc.get("aplyMtdCn") or svc.get("aplyMtdNm", "")
+    contact = svc.get("_contact") or svc.get("rprsCtadr", "")
+    region = " ".join(filter(None, [svc.get("ctpvNm", ""), svc.get("sggNm", "")]))
+    related = " ".join(filter(None, [
+        svc.get("lifeArray") or svc.get("lifeNmArray", ""),
+        svc.get("trgterIndvdlArray") or svc.get("trgterIndvdlNmArray", ""),
+        svc.get("intrsThemaArray") or svc.get("intrsThemaNmArray", ""),
+    ]))
+
+    lines = [f"서비스명: {name}"]
+    if region:
+        lines.append(f"지역: {region}")
+    if summary:
+        lines.append(f"요약: {_clean(summary, 200)}")
+    if target:
+        lines.append(f"지원대상: {_clean(target, 300)}")
+    if crit:
+        lines.append(f"선정기준: {_clean(crit, 200)}")
+    if benefit:
+        lines.append(f"지원내용: {_clean(benefit, 300)}")
+    if apply_:
+        lines.append(f"신청방법: {_clean(apply_, 200)}")
+    if related:
+        lines.append(f"관련어: {related}")
+
+    fields = {
+        "서비스명": name,
+        "지원대상": _clean(target or summary, 180),
+        "지원내용": _clean(benefit or summary, 220),
+        "신청방법": _clean(apply_, 180) or "주민센터·복지로에서 확인",
+        "문의처": _clean(contact, 80) or "보건복지상담센터 129",
+        "구비서류": "",
+        "기준연도": svc.get("crtrYr", ""),
+        "지역": region,
+        "소관": _clean(svc.get("jurMnofNm") or svc.get("bizChrDeptNm", ""), 60),
+        "_scope": scope,
+    }
+    org = "복지로/중앙부처" if scope == "central" else f"복지로/지자체 {region}".rstrip()
+    return DocChunk(
+        text="\n".join(lines),
+        source=f"{org} {svc.get('servId', '')}".strip(),
+        source_type="api",
+        serv_id=svc.get("servId", ""),
+        url=svc.get("servDtlLink", ""),
+        fields=fields,
+        collected_at=collected_at,
     )

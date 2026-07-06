@@ -34,7 +34,7 @@ async def refresh_detail(settings, chunk: DocChunk) -> tuple[dict, bool]:
     try:
         from app.rag import fetch
 
-        fresh = await fetch.fetch_detail(settings, chunk.serv_id)
+        fresh = await fetch.fetch_detail(settings, chunk.serv_id, scope=fields.get("_scope", "central"))
     except Exception as exc:  # noqa: BLE001 — 상세조회 실패로 턴을 깨지 않는다
         log.warning("refresh_detail failed (%s) -> cache", exc)
         fresh = None
@@ -49,6 +49,8 @@ def compose_card(chunk: DocChunk, fields: dict, live: bool) -> tuple[str, str]:
     반환: (카드 텍스트, TTS 대체 안내문)."""
     name = fields.get("서비스명", "").strip() or "복지 서비스"
     lines = [f"📌 {name}"]
+    if fields.get("지역"):
+        lines.append(f"· 지역: {fields['지역']}")
     if fields.get("지원대상"):
         lines.append(f"· 대상: {fields['지원대상']}")
     if fields.get("지원내용"):
