@@ -46,7 +46,6 @@ class Settings(BaseSettings):
     rag_bm25_evidence_mock: float = 4.0      # 목/소형 코퍼스용
     rag_item_min: float = 0.45               # 항목별 벡터 하한 — top4 고집 없이 기준 미달 제외
     rag_item_min_mock: float = 0.03
-    rag_rewrite: bool = False               # LLM 질문 재작성(실모드 전용, 기본 off — 지연 1콜 추가)
 
     # 공공데이터포털 — 서비스(중앙부처/지자체)별로 키·엔드포인트 한 벌씩.
     # 계정 공용 키(포털 정책상 두 페이지 키가 같은 값)라면 같은 값을 두 칸에 넣으면 된다.

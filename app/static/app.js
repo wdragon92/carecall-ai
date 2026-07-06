@@ -70,7 +70,7 @@ function handleWS(m) {
       showUrgent(m.message, m.level);
       break;
     case "ocr_status":
-      if (m.status === "error") toast("사진에서 글자를 읽지 못했어요.");
+      ocrStatus(m);
       break;
     case "error":
       toast(m.message || "일시적인 오류가 있었어요.");
@@ -123,12 +123,33 @@ function appendAiBubble(text, kind, card) {
   div.className = "bubble bubble-ai" + (kind === "card" ? " bubble-card" : "");
   if (kind === "card" && card && card.title) {
     div.appendChild(buildRagCard(card)); // 구조화 카드 (RAG 근거 가시화)
+  } else if (kind === "card") {
+    appendWithBokjiroLinks(div, text); // 텍스트 카드(신청 패키지 등) — 복지로 URL만 링크화
   } else {
     div.textContent = text;
   }
   row.appendChild(div);
   chatLog().appendChild(row);
   scrollDown();
+}
+
+/* 텍스트 카드 안의 복지로 URL만 클릭 링크로 (DOM 노드 조립 — 주입 안전).
+   OCR 문서에서 읽힌 일반 URL(스미싱 링크 등)은 절대 링크화하지 않는다. */
+function appendWithBokjiroLinks(el, text) {
+  const re = /https?:\/\/(?:www\.)?bokjiro\.go\.kr[^\s]*/g;
+  let last = 0, m;
+  while ((m = re.exec(text)) !== null) {
+    el.appendChild(document.createTextNode(text.slice(last, m.index)));
+    const a = document.createElement("a");
+    a.className = "rag-link";
+    a.href = m[0];
+    a.target = "_blank";
+    a.rel = "noopener";
+    a.textContent = "복지로에서 자세히 보기 →";
+    el.appendChild(a);
+    last = m.index + m[0].length;
+  }
+  el.appendChild(document.createTextNode(text.slice(last)));
 }
 
 /* RAG 정보 카드 DOM — 전부 textContent 기반 (주입 안전) */
@@ -157,7 +178,7 @@ function buildRagCard(c) {
     rowEl.appendChild(span);
     box.appendChild(rowEl);
   }
-  if (c.url && /^https:\/\//.test(c.url)) {
+  if (c.url && /^https?:\/\//.test(c.url)) {
     const a = document.createElement("a");
     a.className = "rag-link";
     a.href = c.url;
@@ -184,6 +205,24 @@ function ragStatus(m) {
     _chipTimer = setTimeout(() => wrap.classList.add("hidden"), 4000);
   } else {
     wrap.classList.add("hidden");
+  }
+}
+
+/* OCR 진행 상태 — 같은 칩 자리 재사용 (사진 턴엔 RAG 검색이 없어 충돌 없음) */
+function ocrStatus(m) {
+  const wrap = $("#rag-chip-wrap");
+  const chip = $("#rag-chip");
+  clearTimeout(_chipTimer);
+  if (m.status === "processing") {
+    chip.textContent = "📷 사진에서 글자를 읽는 중…";
+    wrap.classList.remove("hidden");
+  } else if (m.status === "done") {
+    chip.textContent = "📷 사진을 다 읽었어요";
+    wrap.classList.remove("hidden");
+    _chipTimer = setTimeout(() => wrap.classList.add("hidden"), 2500);
+  } else {
+    wrap.classList.add("hidden");
+    toast("사진에서 글자를 읽지 못했어요.");
   }
 }
 function showTyping() {
@@ -262,10 +301,13 @@ function renderWelfare(items) {
   for (const it of items) {
     const el = document.createElement("div");
     el.className = "card newcard";
+    const link = it.url && /^https?:\/\//.test(it.url)
+      ? `<a class="rag-link" style="font-size:0.85rem" href="${escapeHtml(it.url)}" target="_blank" rel="noopener">복지로에서 자세히 보기 →</a>`
+      : "";
     el.innerHTML = `<div class="font-semibold text-blue-700">🤝 ${escapeHtml(it["이름"])}</div>
       <div class="mt-1 text-sm text-gray-700">${escapeHtml(it["한줄"] || "")}</div>
       <div class="mt-1 text-xs text-gray-500">신청: ${escapeHtml(it["신청처"] || "복지로(129)·주민센터")}</div>
-      ${it["기준일"] ? `<div class="mt-0.5 text-xs text-gray-400">정보 기준일 ${escapeHtml(it["기준일"])}</div>` : ""}`;
+      ${it["기준일"] ? `<div class="mt-0.5 text-xs text-gray-400">정보 기준일 ${escapeHtml(it["기준일"])}</div>` : ""}${link}`;
     box.appendChild(el);
   }
   flashMobileBadge();
@@ -616,7 +658,6 @@ function toggleVoice() {
   btn.textContent = state.voiceOn ? "🔊 음성" : "🔇 음성";
   btn.classList.toggle("bg-blue-100", state.voiceOn);
   if (!state.voiceOn) stopAudio();
-  state.ws?.send(JSON.stringify({ type: "set_voice", on: state.voiceOn }));
 }
 function switchMobile(view) {
   $("#chat-pane").classList.toggle("hidden", view !== "chat");

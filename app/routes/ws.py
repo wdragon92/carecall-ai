@@ -41,8 +41,6 @@ async def ws_endpoint(websocket: WebSocket, session_id: str) -> None:
                     continue
                 sess.add_message("user", text, via=data.get("via", "text"))
                 await conversation.handle_turn(sess, providers, settings)
-            elif mtype == "set_voice":
-                sess.voice_on = bool(data.get("on"))
     except WebSocketDisconnect:
         if sess.ws is websocket:
             sess.ws = None

@@ -5,9 +5,8 @@ from __future__ import annotations
 
 import logging
 
-from app.core import prompts, safety, welfare
+from app.core import prompts_analysis, safety, welfare
 from app.models import Finding
-from app.services.base import ProviderError
 from app.session import finding_id
 
 log = logging.getLogger("extract")
@@ -77,18 +76,18 @@ async def _run_once(sess, providers) -> None:
 
     # 2) LLM 추출 (느림) → 안전망과 병합해 갱신
     messages = [
-        {"role": "system", "content": prompts.EXTRACT_SYSTEM},
+        {"role": "system", "content": prompts_analysis.EXTRACT_SYSTEM},
         {"role": "user", "content": transcript},
     ]
     data: dict = {}
     llm_ok = False
     try:
-        data = await providers.llm.extract_json(messages, prompts.EXTRACT_SCHEMA)
+        data = await providers.llm.extract_json(messages, prompts_analysis.EXTRACT_SCHEMA)
         llm_ok = True
     except Exception as exc:  # noqa: BLE001
         log.warning("extract real failed (%s) → mock", exc)
         try:
-            data = await providers.mllm.extract_json(messages, prompts.EXTRACT_SCHEMA)
+            data = await providers.mllm.extract_json(messages, prompts_analysis.EXTRACT_SCHEMA)
             llm_ok = True
         except Exception as exc2:  # noqa: BLE001
             log.error("extract mock failed: %s", exc2)

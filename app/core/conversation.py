@@ -11,6 +11,7 @@ from app.core import prompts, welfare
 from app.rag import rules
 from app.rag.answer import compose_card, pick_card, rag_prompt_block, refresh_detail
 from app.rag.apply import build_apply_package, package_to_text
+from app.rag.cards import BOKJIRO_HOME, card_url
 from app.rag.search import augment_query, hybrid_retrieve, passes_gate
 from app.services.base import ProviderError
 
@@ -23,6 +24,12 @@ BACKCHANNELS = {
     "알겠어", "알겠어요", "고마워", "고마워요", "아니", "아니요", "괜찮아", "괜찮아요",
 }
 
+# 긍정 호응 — 직전에 보미가 "알려드릴까요?" 하고 제안했을 때 수락으로 해석
+_ASSENT = {
+    "응", "응응", "어", "어어", "네", "넵", "예", "그래", "그럼", "그치", "좋아", "좋지",
+    "알겠어", "알겠어요", "궁금해", "알려줘", "알려줘요", "해줘", "부탁해",
+}
+
 
 def _period_now() -> str:
     return prompts.period_of_hour(datetime.now().hour)
@@ -31,6 +38,18 @@ def _period_now() -> str:
 def _is_backchannel(text: str) -> bool:
     t = re.sub(r"[.!?~,…\s]+", "", text or "")
     return bool(t) and len(t) <= 5 and t in BACKCHANNELS
+
+
+_DECLINE = re.compile(r"아니|괜찮|됐어|나중|말고|싫")
+
+
+def _accepts_offer(text: str) -> bool:
+    """직전 복지 제안("알려드릴까요?")에 대한 수락 여부 — 짧은 긍정만 인정."""
+    t = (text or "").strip()
+    norm = re.sub(r"[.!?~,…\s]+", "", t)
+    if not norm or len(norm) > 10 or _DECLINE.search(t):
+        return False
+    return norm in _ASSENT or bool(re.search(r"알려|궁금|자세히|말해|들어보", t))
 
 
 # 목록 항목(번호/글머리/굵은 용어+콜론)으로 시작하는 단락 — 앞 말풍선에 이어 붙일 대상
@@ -113,7 +132,7 @@ async def _speak(
                         "문의": fields.get("문의처", ""),
                         "기준일": chunk.collected_at,
                         "live": live,
-                        "url": chunk.url,
+                        "url": card_url(chunk),
                         "source": chunk.source,
                     },
                 })
@@ -124,6 +143,7 @@ async def _speak(
                     "한줄": fields.get("지원내용", "") or fields.get("지원대상", ""),
                     "신청처": fields.get("신청방법", ""),
                     "기준일": chunk.collected_at,
+                    "url": card_url(chunk),
                 }
                 await welfare.push_welfare(sess)  # 패널도 즉시 갱신 (RAG 카드 우선 병합)
         except Exception as exc:  # noqa: BLE001
@@ -148,6 +168,81 @@ async def greet(sess) -> None:
     await sess.send({"type": "ai_turn", "bubbles": [{"id": msg.id, "text": text}]})
 
 
+# ---- HCX-007(분석) → HCX-005(대화) 환류 (페르소나 §9) ----
+_SEV_ORDER = {"높음": 0, "보통": 1, "낮음": 2}
+
+
+def _situation_memo(sess) -> str:
+    """추출 파이프라인(HCX-007)이 쌓은 세션 상태를 대화(HCX-005) 컨텍스트로 요약.
+    보미가 같은 걸 두 번 묻지 않고, 감지된 복지 니즈를 다음 턴 화제에 자연스럽게 얹게 한다."""
+    parts: list[str] = []
+    age, hh = sess.slots.get("age"), sess.slots.get("household")
+    prof = []
+    if age:
+        prof.append(f"만 {age}세")
+    if hh:
+        prof.append("혼자 지내심" if hh == "single" else "배우자와 함께 지내심")
+    if prof:
+        parts.append("- 어르신 기본 정보: " + ", ".join(prof))
+    if sess.findings:
+        top = sorted(sess.findings, key=lambda f: _SEV_ORDER.get(f.severity, 9))[:6]
+        parts += [f"- 관찰됨({f.category}): {f.content}" for f in top]
+    if sess.welfare_cards:
+        parts.append("- 이미 안내한 복지: " + ", ".join(c["이름"] for c in sess.welfare_cards.values()))
+    offer = _offer_candidate(sess)
+    if offer:
+        parts.append(
+            f"- 복지 제안 힌트: 대화 맥락상 '{offer}'가 도움이 될 수 있음. 흐름이 맞으면 "
+            "\"도움되는 제도가 있는데 알려드릴까요?\" 하고 서비스 이름과 함께 여쭤보기 (수락하시면 자세히 안내됨)."
+        )
+    return "\n".join(parts)
+
+
+def _offer_candidate(sess) -> str | None:
+    """추출이 패널에 매칭해 둔 복지 중 아직 대화로 안내하지 않은 첫 항목."""
+    guided = {c.get("이름") for c in sess.welfare_cards.values()}
+    for it in welfare.by_ids(sess.welfare_matched):
+        if it["이름"] not in guided:
+            return it["이름"]
+    return None
+
+
+def _last_offer_text(sess) -> str | None:
+    """직전 보미 발화가 복지 제안("알려드릴까요?")이었으면 그 발화 원문."""
+    last_ai = next((m for m in reversed(sess.messages) if m.role == "assistant"), None)
+    if last_ai is not None and "알려드릴까요" in last_ai.text:
+        return last_ai.text
+    return None
+
+
+def _offered_service(sess) -> str | None:
+    """직전 보미 제안에서 서비스명을 특정한다 (후속 질의 보강 힌트용)."""
+    offer = _last_offer_text(sess)
+    if offer is None:
+        return None
+    text_n = re.sub(r"\s+", "", offer)
+    names = [it.이름 for it in welfare.load_items()] + [
+        c.get("이름", "") for c in sess.welfare_cards.values()
+    ]
+    for name in names:
+        if name and re.sub(r"\s+", "", name) in text_n:
+            return name
+    return _offer_candidate(sess)
+
+
+def _offer_query(sess) -> str | None:
+    """수락된 제안의 검색 질의 — 서비스명을 특정 못 하면 제안 발화 자체를 질의로 쓴다.
+    (보미가 이름 없이 "무릎 수술비 도와주는 제도가 있는데 알려드릴까요?"만 한 경우도
+    어르신의 "응" 한마디로 근거 있는 카드 안내까지 이어지게.)"""
+    offer = _last_offer_text(sess)
+    if offer is None:
+        return None
+    named = _offered_service(sess)
+    if named:
+        return named
+    return re.sub(r"\s+", " ", offer)[:120]
+
+
 async def _rag_lookup(sess, providers, settings, user_text: str) -> dict | None:
     """RAG 게이트 (v2 §3 트리거 A): 항상 로컬 검색을 시도하되, 벡터 top_score가
     임계값 미만이면 None(일반 수다 경로). 임베딩 장애도 조용히 수다 경로로."""
@@ -156,7 +251,9 @@ async def _rag_lookup(sess, providers, settings, user_text: str) -> dict | None:
         return None
     await sess.send({"type": "rag_status", "status": "searching"})  # 프론트: "복지 자료 찾는 중…"
     try:
-        q = augment_query(user_text, (sess.last_rag or {}).get("서비스명"))
+        # 후속 질문 보강 힌트: 직전 안내 서비스 → 없으면 직전 턴에 제안한 서비스
+        hint = (sess.last_rag or {}).get("서비스명") or _offered_service(sess)
+        q = augment_query(user_text, hint)
         qvec = (await providers.embed.embed([q]))[0]
     except Exception as exc:  # noqa: BLE001 — 임베딩 실패로 턴을 깨지 않는다
         log.warning("rag embed failed (%s) → chit-chat path", exc)
@@ -239,6 +336,7 @@ async def _handle_screening(sess, providers, settings, fresh: bool) -> bool:
             "id": "fixture-basic-pension", "이름": "기초연금",
             "한줄": fields.get("지원내용", "") or "만 65세 이상 소득 하위 어르신 연금",
             "신청처": fields.get("신청방법", ""), "기준일": collected_at,
+            "url": url or BOKJIRO_HOME,
         }
         await welfare.push_welfare(sess)
 
@@ -263,11 +361,24 @@ async def handle_turn(sess, providers, settings) -> None:
                 _spawn_extract(sess, providers)
                 return
 
-    card_ctx = None if bc else await _rag_lookup(sess, providers, settings, user_text)
-    if card_ctx:
-        system = prompts.chat_system(card_ctx["block"], backchannel=bc, rag=True)
-    else:
-        system = prompts.chat_system(welfare.get_digest(), backchannel=bc)
+    # 제안 수락 흐름: 직전 턴에 보미가 복지를 제안("알려드릴까요?")했고 어르신이 긍정 호응
+    # → 그 서비스명으로 근거(RAG) 검색해 카드까지 이어지는 안내 턴으로 승격.
+    card_ctx = None
+    if _accepts_offer(user_text):
+        offered = _offer_query(sess)
+        if offered:
+            card_ctx = await _rag_lookup(sess, providers, settings, offered)
+            if card_ctx:
+                bc = False
+    if card_ctx is None and not bc:
+        card_ctx = await _rag_lookup(sess, providers, settings, user_text)
+
+    system = prompts.chat_system(
+        card_ctx["block"] if card_ctx else "",
+        memo=_situation_memo(sess),  # HCX-007 추출 결과를 대화 컨텍스트로 환류
+        backchannel=bc,
+        rag=bool(card_ctx),
+    )
     messages = [{"role": "system", "content": system}] + sess.history_for_llm()
     # 복지 안내처럼 긴 정보가 목록 중간에 잘리지 않도록 여유 있게. 평소 답의 길이는 프롬프트가 통제.
     await _speak(sess, providers, messages, max_tokens=600, card_ctx=card_ctx, settings=settings)

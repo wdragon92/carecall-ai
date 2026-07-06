@@ -1,12 +1,11 @@
 """CLOVA Studio (HyperCLOVA X) 실 구현 — Chat Completions v3.
-스펙: POST {BASE}/v3/chat-completions/{model}, Bearer 인증,
-스트리밍은 Accept: text/event-stream, SSE `event: token`의 message.content 증분."""
+스펙: POST {BASE}/v3/chat-completions/{model}, Bearer 인증.
+모델 라우팅: chat()=HCX-005(빠른 대화), extract_json()=HCX-007(분석·reasoning)."""
 from __future__ import annotations
 
 import json
 import logging
 import uuid
-from typing import AsyncIterator
 
 import httpx
 
@@ -37,12 +36,12 @@ class ClovaLLM:
         self.key = settings.clova_studio_api_key.strip()
         self._client = httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=10.0))
 
-    def _headers(self, stream: bool) -> dict:
+    def _headers(self) -> dict:
         return {
             "Authorization": f"Bearer {self.key}",
             "X-NCP-CLOVASTUDIO-REQUEST-ID": uuid.uuid4().hex,
             "Content-Type": "application/json",
-            "Accept": "text/event-stream" if stream else "application/json",
+            "Accept": "application/json",
         }
 
     def _body(self, messages: list[dict], **opts) -> dict:
@@ -58,39 +57,11 @@ class ClovaLLM:
             body["stop"] = opts["stop"]
         return body
 
-    async def chat_stream(self, messages: list[dict], **opts) -> AsyncIterator[str]:
-        url = f"{BASE}/v3/chat-completions/{self.chat_model}"
-        body = self._body(messages, **opts)
-        try:
-            async with self._client.stream("POST", url, headers=self._headers(True), json=body) as resp:
-                if resp.status_code != 200:
-                    detail = (await resp.aread())[:300]
-                    raise ProviderError(f"CLOVA LLM {resp.status_code}: {detail!r}")
-                event = None
-                async for line in resp.aiter_lines():
-                    if not line:
-                        event = None
-                        continue
-                    if line.startswith("event:"):
-                        event = line[6:].strip()
-                    elif line.startswith("data:") and event == "token":
-                        data = line[5:].strip()
-                        if not data:
-                            continue
-                        try:
-                            chunk = json.loads(data).get("message", {}).get("content", "")
-                        except json.JSONDecodeError:
-                            continue
-                        if chunk:
-                            yield chunk
-        except httpx.HTTPError as exc:
-            raise ProviderError(f"CLOVA LLM stream error: {exc}") from exc
-
     async def chat(self, messages: list[dict], *, model: str | None = None, **opts) -> str:
         url = f"{BASE}/v3/chat-completions/{model or self.chat_model}"
         body = self._body(messages, **opts)
         try:
-            resp = await self._client.post(url, headers=self._headers(False), json=body)
+            resp = await self._client.post(url, headers=self._headers(), json=body)
         except httpx.HTTPError as exc:
             raise ProviderError(f"CLOVA LLM error: {exc}") from exc
         if resp.status_code != 200:

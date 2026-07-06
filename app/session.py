@@ -35,7 +35,6 @@ class Session:
         self.tts_cache: "OrderedDict[str, bytes]" = OrderedDict()
         self.extract_lock = asyncio.Lock()
         self.extract_dirty = False
-        self.voice_on = True
         self.ws = None  # 활성 WebSocket (있으면)
         self.send_lock = asyncio.Lock()  # WS 동시 전송 직렬화
         self.bg_tasks: set = set()  # 백그라운드 태스크(추출 등) 참조 유지

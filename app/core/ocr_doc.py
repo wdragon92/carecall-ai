@@ -8,7 +8,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 
-from app.core import prompts
+from app.core import prompts_analysis
 
 log = logging.getLogger("ocr_doc")
 
@@ -103,7 +103,7 @@ def _from_llm(data, src: str) -> DocInfo | None:
         return str(v or "").strip()[:n]
 
     doc = DocInfo(
-        종류=data.get("종류") if data.get("종류") in prompts.DOC_TYPES else "기타",
+        종류=data.get("종류") if data.get("종류") in prompts_analysis.DOC_TYPES else "기타",
         보낸곳=clean(data.get("보낸곳"), 40),
         주의=clean(data.get("주의"), 80),
         사기_의심=bool(data.get("사기_의심")),
@@ -129,10 +129,10 @@ async def classify_document(providers, ocr_text: str) -> DocInfo:
         try:
             data = await providers.llm.extract_json(
                 [
-                    {"role": "system", "content": prompts.DOC_CLASSIFY_SYSTEM},
+                    {"role": "system", "content": prompts_analysis.DOC_CLASSIFY_SYSTEM},
                     {"role": "user", "content": text[:2000]},
                 ],
-                prompts.DOC_CLASSIFY_SCHEMA,
+                prompts_analysis.DOC_CLASSIFY_SCHEMA,
             )
             doc = _from_llm(data, text)
             if doc is not None:

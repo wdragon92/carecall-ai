@@ -2,14 +2,12 @@
 결정적(deterministic) 규칙 기반이라 시나리오 데모/테스트에 사용."""
 from __future__ import annotations
 
-import asyncio
 import io
 import math
 import re
 import struct
 import wave
 import zlib
-from typing import AsyncIterator
 
 
 def _last_user(messages: list[dict]) -> str:
@@ -65,12 +63,6 @@ class MockLLM:
         self._turn += 1
         return _CHAT_DEFAULTS[self._turn % len(_CHAT_DEFAULTS)]
 
-    async def chat_stream(self, messages: list[dict], **opts) -> AsyncIterator[str]:
-        reply = self._reply(messages)
-        for token in reply.split(" "):
-            await asyncio.sleep(0.02)
-            yield token + " "
-
     async def chat(self, messages: list[dict], **opts) -> str:
         return self._reply(messages)
 
@@ -100,11 +92,7 @@ class MockLLM:
             add("복지_니즈", "경제적 어려움 신호가 관찰됨", "보통")
             signals.update(["저소득"])
 
-        return {
-            "findings": findings,
-            "welfare_signals": sorted(signals),
-            "matched_welfare_ids": [],
-        }
+        return {"findings": findings, "welfare_signals": sorted(signals)}
 
 
 _STT_SAMPLES = [

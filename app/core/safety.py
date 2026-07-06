@@ -117,9 +117,15 @@ def alert(kinds: set[str], llm_flags: set[str] | frozenset[str] = frozenset()) -
     연계 원칙: 자살예방상담 109는 심리 신호에만, 건강 응급은 119·보호자 연계로 분리.
     수동적(완곡) 자살신호는 warning 고정(직접 표현만 emergency).
     mood_low(우울·무기력)는 배너 없이 카드로만."""
-    if "suicide_acute" in kinds or "psych" in llm_flags:
+    # 결정적(코드) 탐지를 LLM 플래그보다 먼저 — LLM이 의료 응급을 '긴급(심리)'로 잘못 라벨해도
+    # 코드가 잡은 의료 응급이 109(심리 전용) 문구에 가려지지 않게 한다.
+    if "suicide_acute" in kinds:
         return "emergency", "위급한 신호가 감지됐어요. 지금 자살예방상담 109 또는 119, 곁의 보호자·담당자에게 바로 연결하시길 권해요."
-    if "medical_emergency" in kinds or "medical" in llm_flags:
+    if "medical_emergency" in kinds:
+        return "emergency", "응급이 의심되는 몸 신호가 있어요. 지금 바로 119에 연락하시고, 보호자께도 알려주세요."
+    if "psych" in llm_flags:
+        return "emergency", "위급한 신호가 감지됐어요. 지금 자살예방상담 109 또는 119, 곁의 보호자·담당자에게 바로 연결하시길 권해요."
+    if "medical" in llm_flags:
         return "emergency", "응급이 의심되는 몸 신호가 있어요. 지금 바로 119에 연락하시고, 보호자께도 알려주세요."
     if "suicide_warning" in kinds:
         return "warning", "마음이 많이 지치신 것 같아 걱정돼요. 혼자 힘들어하지 마시고, 24시간 자살예방상담 109나 가까운 분과 이야기 나눠보시길 권해요."

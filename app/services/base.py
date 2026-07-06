@@ -1,7 +1,7 @@
 """Provider 추상 인터페이스 5종 (services §7.1)."""
 from __future__ import annotations
 
-from typing import AsyncIterator, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 
 class ProviderError(Exception):
@@ -10,7 +10,6 @@ class ProviderError(Exception):
 
 @runtime_checkable
 class LLMProvider(Protocol):
-    def chat_stream(self, messages: list[dict], **opts) -> AsyncIterator[str]: ...
     async def chat(self, messages: list[dict], **opts) -> str: ...
     async def extract_json(self, messages: list[dict], schema: dict) -> dict: ...
 

@@ -3,15 +3,10 @@ from __future__ import annotations
 
 import logging
 
-from app.core import prompts, welfare
+from app.core import prompts_analysis, welfare
 from app.models import Report
-from app.services.base import ProviderError
 
 log = logging.getLogger("report")
-
-
-def _is_urgent(f) -> bool:
-    return f.category == "긴급" or (f.severity == "높음" and f.needs_human)
 
 
 def _fallback_report(sess):
@@ -31,7 +26,7 @@ def _fallback_report(sess):
     if any(f.category == "건강" and f.severity == "높음" for f in sess.findings):
         recs.append("건강 위험신호가 관찰되었습니다. 가까운 시일 안에 진료(응급 의심 시 119)를 권합니다.")
     if any(f.category == "정서" and f.severity == "높음" for f in sess.findings):
-        recs.append("정서적으로 많이 지치신 상태가 관찰됩니다. 자살예방상담 109·정신건강상담 1577-0199 연계와 잦은 안부 연락을 권합니다.")
+        recs.append("정서적으로 많이 지치신 상태가 관찰됩니다. 자살예방상담 109(24시간) 연계와 잦은 안부 연락을 권합니다.")
     elif any(f.category == "정서" for f in sess.findings):
         recs.append("정기적인 안부 연락이 정서적 안정에 도움이 됩니다.")
     if any(f.category == "복지_니즈" for f in sess.findings):
@@ -50,7 +45,7 @@ async def generate_report(sess, providers) -> dict:
         or "관찰된 특이사항 없음"
     )
     messages = [
-        {"role": "system", "content": prompts.REPORT_SYSTEM},
+        {"role": "system", "content": prompts_analysis.REPORT_SYSTEM},
         {"role": "user", "content": f"[대화]\n{transcript}\n\n[관찰된 특이사항]\n{findings_txt}"},
     ]
 
