@@ -363,7 +363,7 @@ function sendFromInput() {
 }
 
 /* ================= 입력: 마이크 (클릭 토글 — 눌러 시작, 다시 눌러 전송) ================= */
-let _stream, _ctx, _proc, _src, _chunks, _recTimer, _recog, _liveRow;
+let _stream, _ctx, _proc, _src, _mute, _chunks, _recTimer, _recog, _liveRow;
 
 /* 실시간 인식 미리보기 (브라우저 Web Speech) — 표시용일 뿐, 최종 확정은 CLOVA CSR.
    미지원 브라우저(사파리 일부/파이어폭스)는 조용히 기존 방식으로 동작. */
@@ -405,7 +405,9 @@ async function startRec() {
   if (state.recording) return;
   state.recPending = true;
   try {
-    _stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    _stream = await navigator.mediaDevices.getUserMedia({
+      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    });
   } catch (e) {
     state.recPending = false;
     toast("마이크 사용 권한이 필요해요. 주소창 옆 🔒에서 마이크를 허용해 주세요.");
@@ -418,14 +420,34 @@ async function startRec() {
   const btn = $("#btn-mic");
   btn.classList.add("btn-rec"); // !important 클래스 — Tailwind 순서 경합 없이 확실한 녹음 표시
   btn.setAttribute("aria-pressed", "true");
-  _ctx = new (window.AudioContext || window.webkitAudioContext)();
+  // CSR 목표 샘플레이트(16k)로 컨텍스트를 직접 요청 — 브라우저가 고품질 리샘플링을 해준다.
+  // (미지원 브라우저는 기본 레이트로 열리고, 아래 downsample 폴백이 처리)
+  const AC = window.AudioContext || window.webkitAudioContext;
+  try {
+    _ctx = new AC({ sampleRate: 16000 });
+  } catch (e) {
+    _ctx = new AC();
+  }
   try { await _ctx.resume(); } catch (e) {}
-  _src = _ctx.createMediaStreamSource(_stream);
+  try {
+    _src = _ctx.createMediaStreamSource(_stream);
+  } catch (e) {
+    // 일부 브라우저는 16k 컨텍스트에 마이크 스트림 연결을 거부 → 기본 레이트로 재시도
+    try { _ctx.close(); } catch (e2) {}
+    _ctx = new AC();
+    try { await _ctx.resume(); } catch (e2) {}
+    _src = _ctx.createMediaStreamSource(_stream);
+  }
   _proc = _ctx.createScriptProcessor(4096, 1, 1);
   _chunks = [];
   _proc.onaudioprocess = (e) => _chunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
   _src.connect(_proc);
-  _proc.connect(_ctx.destination);
+  // ⚠️ destination에 직결하면 녹음 중 마이크가 스피커로 새어 하울링·에코가 녹음에 섞인다
+  // (실시간 미리보기는 멀쩡한데 전송본만 달라지던 주범). 무음 게인으로 그래프만 구동.
+  _mute = _ctx.createGain();
+  _mute.gain.value = 0;
+  _proc.connect(_mute);
+  _mute.connect(_ctx.destination);
   startLivePreview(); // 말하는 동안 실시간 자막 (지원 브라우저만)
   _recTimer = setTimeout(() => { if (state.recording) stopRec(); }, 30000); // 최대 30초(CSR 60초 제한 대비)
 }
@@ -437,9 +459,11 @@ async function stopRec() {
   const btn = $("#btn-mic");
   btn.classList.remove("btn-rec");
   btn.setAttribute("aria-pressed", "false");
+  await _sleep(220); // 마지막 어절이 프로세서 버퍼에 남아 잘리지 않게 꼬리를 받는다
   try {
     _proc.disconnect();
     _src.disconnect();
+    if (_mute) _mute.disconnect();
     _stream.getTracks().forEach((t) => t.stop());
   } catch (e) {}
   stopLivePreview();
@@ -458,7 +482,7 @@ async function stopRec() {
   if (noteBubble.classList.contains("bubble-live") && noteBubble.textContent === "🎤 듣고 있어요…") {
     noteBubble.textContent = "🎤 음성 인식 중…";
   }
-  const wav = encodeWAV(downsample(flat, sr, 16000), 16000);
+  const wav = encodeWAV(normalizePeak(downsample(flat, sr, 16000)), 16000);
   const fd = new FormData();
   fd.append("file", new Blob([wav], { type: "audio/wav" }), "rec.wav");
   try {
@@ -490,8 +514,26 @@ function downsample(buf, from, to) {
   const ratio = from / to;
   const outLen = Math.floor(buf.length / ratio);
   const out = new Float32Array(outLen);
-  for (let i = 0; i < outLen; i++) out[i] = buf[Math.floor(i * ratio)];
+  // 구간 평균(박스 필터) 후 추출 — 점추출은 앨리어싱으로 자음이 뭉개져 CSR 정확도를 깎는다
+  for (let i = 0; i < outLen; i++) {
+    const start = Math.floor(i * ratio);
+    const end = Math.min(buf.length, Math.max(start + 1, Math.floor((i + 1) * ratio)));
+    let sum = 0;
+    for (let j = start; j < end; j++) sum += buf[j];
+    out[i] = sum / (end - start);
+  }
   return out;
+}
+function normalizePeak(buf, target = 0.9) {
+  let peak = 0;
+  for (let i = 0; i < buf.length; i++) {
+    const a = Math.abs(buf[i]);
+    if (a > peak) peak = a;
+  }
+  if (peak < 0.02 || peak >= target) return buf; // 사실상 무음이거나 이미 충분한 레벨
+  const g = target / peak;
+  for (let i = 0; i < buf.length; i++) buf[i] *= g;
+  return buf;
 }
 function encodeWAV(samples, rate) {
   const buf = new ArrayBuffer(44 + samples.length * 2);
