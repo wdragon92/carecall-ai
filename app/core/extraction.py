@@ -71,7 +71,7 @@ async def _run_once(sess, providers) -> None:
     if safety_findings:
         sess.findings = _merge(safety_findings, sess.findings)
         await sess.send({"type": "findings_update", "findings": [_dump(f) for f in sess.findings]})
-    level, message = safety.alert(kinds, llm_serious=False)
+    level, message = safety.alert(kinds)
     if level:
         await sess.send({"type": "urgent_alert", "level": level, "message": message})
 
@@ -100,11 +100,18 @@ async def _run_once(sess, providers) -> None:
     sess.findings = findings
     await sess.send({"type": "findings_update", "findings": [_dump(f) for f in findings]})
 
-    # 경보 재평가 — LLM이 새 위험을 잡았으면 상향(하향은 안 함)
-    llm_serious = any(
-        f.category == "긴급" or (f.severity == "높음" and f.needs_human) for f in llm_findings
-    )
-    level2, message2 = safety.alert(kinds, llm_serious)
+    # 경보 재평가 — LLM이 새 위험을 잡았으면 상향(하향은 안 함).
+    # 연계 분리: 건강 위급 → 119 문구 / 심리(긴급·정서) 위급 → 109 문구 (109는 심리 전용)
+    llm_flags: set[str] = set()
+    for f in llm_findings:
+        serious = f.category == "긴급" or (f.severity == "높음" and f.needs_human)
+        if not serious:
+            continue
+        if f.category == "건강":
+            llm_flags.add("medical")
+        else:
+            llm_flags.add("psych")
+    level2, message2 = safety.alert(kinds, llm_flags)
     if level2 and level2 != level:
         await sess.send({"type": "urgent_alert", "level": level2, "message": message2})
 

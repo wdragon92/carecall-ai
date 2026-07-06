@@ -42,16 +42,18 @@ def test_scan_mood_low_is_card_only():
     k = _kinds("어르신: 요즘 만사가 귀찮고 다 소용없어요")
     assert "mood_low" in k
     # mood_low 단독은 경보 배너를 띄우지 않음(카드로만 관찰)
-    assert safety.alert({"mood_low"}, False)[0] is None
+    assert safety.alert({"mood_low"})[0] is None
 
 
 def test_alert_levels():
-    assert safety.alert({"suicide_acute"}, False)[0] == "emergency"
-    assert safety.alert({"medical_emergency"}, False)[0] == "emergency"
-    assert safety.alert({"suicide_warning"}, False)[0] == "warning"
-    assert safety.alert({"medical_soon"}, False)[0] == "warning"
-    assert safety.alert(set(), True)[0] == "emergency"
-    assert safety.alert(set(), False)[0] is None
+    assert safety.alert({"suicide_acute"})[0] == "emergency"
+    assert safety.alert({"medical_emergency"})[0] == "emergency"
+    assert safety.alert({"suicide_warning"})[0] == "warning"
+    assert safety.alert({"medical_soon"})[0] == "warning"
+    # LLM 심각신호는 건강/심리로 분리 (109는 심리 전용)
+    assert safety.alert(set(), {"psych"})[0] == "emergency"
+    assert safety.alert(set(), {"medical"})[0] == "emergency"
+    assert safety.alert(set())[0] is None
 
 
 def _drain_until(ws, pred, max_msgs=90):

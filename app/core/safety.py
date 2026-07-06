@@ -30,7 +30,9 @@ RULES: tuple[Rule, ...] = (
           "반쪽이 마비", "한쪽 눈이 안 보")),
     Rule("medical_emergency", "건강", "높음", True, "응급 의심 신호(심장/호흡) — 즉시 119 권고",
          ("가슴이 쥐어", "가슴을 쥐어", "가슴이 조여", "가슴이 짓눌", "가슴이 터질",
-          "식은땀", "숨이 안 쉬", "숨을 못 쉬", "숨차서 말", "입술이 파래")),
+          "식은땀", "숨이 안 쉬", "숨을 못 쉬", "숨차서 말", "입술이 파래",
+          "숨이 잘 안 쉬", "숨이 잘 안쉬", "숨쉬기가 힘들", "숨 쉬기가 힘들", "숨쉬기 힘들",
+          "숨을 잘 못 쉬", "숨이 막혀")),
     Rule("medical_emergency", "건강", "높음", True, "응급 의심 신호(의식/출혈) — 즉시 119 권고",
          ("쓰러졌", "정신을 잃", "의식을 잃", "깨워도 안", "피를 토", "새까만 변",
           "짜장 같은", "피가 안 멈", "벼락 맞은", "터질 듯한 두통")),
@@ -110,18 +112,17 @@ def scan(text: str) -> list[dict]:
     return out
 
 
-def alert(kinds: set[str], llm_serious: bool) -> tuple[str | None, str | None]:
-    """탐지된 kind + LLM 심각신호로 경보 레벨·문구 결정. (level, message).
-    수동적(완곡) 자살신호는 LLM이 '긴급'으로 올려도 warning으로 고정(직접 표현만 emergency).
-    mood_low(우울·무기력)는 배너를 띄우지 않고 카드로만 남긴다."""
-    if "suicide_acute" in kinds:
+def alert(kinds: set[str], llm_flags: set[str] | frozenset[str] = frozenset()) -> tuple[str | None, str | None]:
+    """탐지된 kind + LLM 심각신호(flags ⊆ {"medical","psych"})로 경보 레벨·문구 결정.
+    연계 원칙: 자살예방상담 109는 심리 신호에만, 건강 응급은 119·보호자 연계로 분리.
+    수동적(완곡) 자살신호는 warning 고정(직접 표현만 emergency).
+    mood_low(우울·무기력)는 배너 없이 카드로만."""
+    if "suicide_acute" in kinds or "psych" in llm_flags:
         return "emergency", "위급한 신호가 감지됐어요. 지금 자살예방상담 109 또는 119, 곁의 보호자·담당자에게 바로 연결하시길 권해요."
-    if "medical_emergency" in kinds:
-        return "emergency", "응급이 의심되는 몸 신호가 있어요. 지금 바로 119에 연락하시거나 곁의 분께 도움을 청하세요."
+    if "medical_emergency" in kinds or "medical" in llm_flags:
+        return "emergency", "응급이 의심되는 몸 신호가 있어요. 지금 바로 119에 연락하시고, 보호자께도 알려주세요."
     if "suicide_warning" in kinds:
         return "warning", "마음이 많이 지치신 것 같아 걱정돼요. 혼자 힘들어하지 마시고, 24시간 자살예방상담 109나 가까운 분과 이야기 나눠보시길 권해요."
     if "medical_soon" in kinds:
-        return "warning", "몸에 신경 쓰이는 신호가 있어요. 그냥 두지 마시고 가까운 시일 안에 진료를 받아보시길 권해요."
-    if llm_serious:
-        return "emergency", "위급 신호가 감지됐어요. 119 또는 자살예방상담 109, 보호자·담당자 연결을 권고합니다."
+        return "warning", "몸에 신경 쓰이는 신호가 있어요. 그냥 두지 마시고 가까운 시일 안에 진료를 받아보시고, 보호자께도 알려드리세요."
     return None, None
