@@ -98,17 +98,28 @@ async def _typing(sess, on: bool) -> None:
     await sess.send({"type": "ai_typing", "on": on})
 
 
+# 위기 국면에서 걷어낼 작별·마무리 문장 패턴 (문장 단위)
+_FAREWELL = re.compile(
+    r"사랑합니다|사랑해요|평안한|편안한 (하루|저녁|밤)|좋은 (하루|밤|꿈)|푹 주무|굿나잇"
+    r"|기도할게요|기원하겠|행복한 하루|오늘 하루도.*보내"
+)
+
+
 async def _speak(
     sess, providers, messages, max_tokens: int = 240, single: bool = False,
     card_ctx: dict | None = None, settings=None,
     action_card: tuple[str, str] | None = None,
+    temperature: float | None = None,
+    crisis: str = "",
 ) -> str:
     """AI 응답을 받아 말풍선 여러 개로 나눠 순차 전송(타이핑 + 간격). 전체 텍스트 반환.
     card_ctx가 있으면 T2 정보 카드(kind:card)를 같은 턴 마지막 말풍선으로 붙인다."""
     await _typing(sess, True)
     full = ""
     # 접지(RAG) 턴은 온도를 낮춰 자료 기반 답의 일관성을 높인다 (카드-답변 서비스 일치율↑)
-    temperature = 0.45 if card_ctx else 0.6
+    # 위기 턴은 호출부가 더 낮은 온도를 지정(지침 이탈 억제)
+    if temperature is None:
+        temperature = 0.45 if card_ctx else 0.6
     try:
         full = await providers.llm.chat(messages, max_tokens=max_tokens, temperature=temperature, top_p=0.8)
         if not full.strip():
@@ -123,6 +134,18 @@ async def _speak(
 
     # 마크다운 강조가 발화에 새면 화면엔 별표, TTS엔 잡음 — 서식은 카드 전용
     full = re.sub(r"\*{1,2}([^*\n]+)\*{1,2}", r"\1", full)
+    if crisis:
+        # 위기 국면 작별·마무리 문장 결정적 제거 — 지침·예시로도 간헐 재발(실측 '사랑합니다')
+        sents = re.split(r"(?<=[.!?요다])\s+", full)
+        kept = [s for s in sents if not _FAREWELL.search(s)]
+        full = " ".join(kept).strip() or "저는 여기 어르신 곁에 있을게요. 지금 마음은 좀 어떠세요?"
+        # 위기번호 발화 백스톱 — 프롬프트 변주와 무관하게 연결처는 코드가 보장(T2 원칙)
+        num = "119" if crisis == "emergency" else "109"
+        if num not in full:
+            tail = ("지금은 지체 말고 119에 먼저 전화하세요. 제가 곁에 있을게요."
+                    if crisis == "emergency"
+                    else "혼자 견디지 않으셔도 돼요. 자살예방상담 109번이 밤낮없이 이야기를 들어줘요.")
+            full = f"{full}\n\n{tail}"
     if card_ctx is not None:
         # T2 하드 가드: 접지 턴 발화의 금액은 카드로만 — 자료 블록의 수치를 LLM이
         # 발화로 옮기는 누출("월 최대 약 34만 원…") 실측. 결정적으로 걷어낸다.
@@ -521,8 +544,10 @@ async def handle_turn(sess, providers, settings) -> None:
     )
     messages = [{"role": "system", "content": system}] + sess.history_for_llm()
     # 복지 안내처럼 긴 정보가 목록 중간에 잘리지 않도록 여유 있게. 평소 답의 길이는 프롬프트가 통제.
+    in_crisis = signal_level if signal_level in ("emergency", "suicide") else ""
     await _speak(sess, providers, messages, max_tokens=600, card_ctx=card_ctx, settings=settings,
-                 action_card=action_card)
+                 action_card=action_card,
+                 temperature=0.3 if in_crisis else None, crisis=in_crisis)
     _spawn_extract(sess, providers)  # 비동기 추출
 
 
