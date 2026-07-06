@@ -13,7 +13,15 @@ def test_rules_verdicts():
     assert v == "확인필요" and ("혼자" in m or "배우자" in m)  # 가구 되묻기
 
     v, m = check_basic_pension(70, "single", None)
-    assert v == "확인필요" and "모의계산" in m  # 고시값 미기입(None) → 안전한 연계
+    assert v == "확인필요" and "모의계산" in m and "247만" in m  # 고시값 안내(코드 삽입, T2)
+
+    # 2026 고시값 판정 (단독 247만 / 부부 395.2만 — 복지부 보도자료, income은 만원 단위)
+    v, _ = check_basic_pension(72, "single", 100)
+    assert v == "가능성높음"
+    v, m = check_basic_pension(72, "single", 300)
+    assert v == "가능성낮음" and "247만" in m
+    v, _ = check_basic_pension(72, "couple", 380)
+    assert v == "가능성높음"
 
 
 def test_screen_intent():
