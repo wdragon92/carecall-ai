@@ -260,7 +260,8 @@ async def _rag_lookup(sess, providers, settings, user_text: str) -> dict | None:
     rt = providers.rag
     if rt is None or not settings.rag_enabled or not user_text.strip():
         return None
-    await sess.send({"type": "rag_status", "status": "searching"})  # 프론트: "복지 자료 찾는 중…"
+    # 검색은 조용히 돌린다 — '찾는 중' 칩을 매 턴 띄우면 잡담("도레미파솔라시도")에도
+    # 검색 UI가 깜빡여 소음이 된다. 칩은 근거를 실제로 찾았을 때(found)만.
     try:
         # 후속 질문 보강 힌트: 직전 안내 서비스 → 없으면 직전 턴에 제안한 서비스
         hint = (sess.last_rag or {}).get("서비스명") or _offered_service(sess)
@@ -268,7 +269,6 @@ async def _rag_lookup(sess, providers, settings, user_text: str) -> dict | None:
         qvec = (await providers.embed.embed([q]))[0]
     except Exception as exc:  # noqa: BLE001 — 임베딩 실패로 턴을 깨지 않는다
         log.warning("rag embed failed (%s) → chit-chat path", exc)
-        await sess.send({"type": "rag_status", "status": "none"})
         return None
     emode = providers.modes.get("embed", "mock")
     r = hybrid_retrieve(rt, qvec, q, k=settings.rag_top_k, pool=settings.rag_pool,
@@ -277,7 +277,6 @@ async def _rag_lookup(sess, providers, settings, user_text: str) -> dict | None:
     ok = passes_gate(r, settings, emode)
     log.info("rag lookup top=%.3f bm25=%.1f gate=%s q=%s", r.top_score, r.bm25_top, ok, q[:40])
     if not ok:
-        await sess.send({"type": "rag_status", "status": "none"})
         return None
     await sess.send({
         "type": "rag_status", "status": "found",

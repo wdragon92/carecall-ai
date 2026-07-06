@@ -151,7 +151,7 @@ def test_alien_tokens_zero_bm25(mock_rt):
     assert r.bm25_top == 0.0
 
 
-# ---- RG-18: 임베딩 장애 → 수다 경로로 조용히 폴백 (searching→none) ----
+# ---- RG-18: 임베딩 장애 → 수다 경로로 조용히 폴백 (칩 소음 없음) ----
 class _RecSess(SimpleNamespace):
     async def send(self, payload):
         self.sent.append(payload)
@@ -169,8 +169,8 @@ async def test_rag_lookup_embed_failure_falls_back_quietly():
 
     out = await conversation._rag_lookup(sess, providers, settings, "치매 약값이 걱정이에요")
     assert out is None
-    statuses = [m["status"] for m in sess.sent if m["type"] == "rag_status"]
-    assert statuses == ["searching", "none"]
+    # 칩은 근거 발견(found) 시에만 — 실패·미달 턴엔 검색 UI 소음을 내지 않는다
+    assert all(m.get("type") != "rag_status" for m in sess.sent)
 
 
 # ---- RG-21: 복지 패널 병합 — RAG 카드 우선 + 이름 dedupe + 4개 절단 ----
