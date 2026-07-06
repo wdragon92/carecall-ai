@@ -130,6 +130,13 @@ def test_accepts_offer():
 def test_offered_service_from_last_ai_message():
     sess = _sess("어르신, 혹시 '노인맞춤돌봄서비스'라고 들어보셨어요? 도움되는 제도가 있는데 알려드릴까요?")
     assert _offered_service(sess) == "노인맞춤돌봄서비스"
+    # LLM 표현 변주: "~ 알려드릴게요"도 제안으로 인식 (실측)
+    sess_b = _sess("'의료급여'라는 제도가 있어요. 필요하시다면 더 자세히 알려드릴게요.")
+    assert _offered_service(sess_b) == "의료급여"
+    # 카드 말풍선이 마지막이어도 직전 발화의 제안을 찾는다
+    sess_c = _sess("'의료급여'라는 제도가 있어요. 자세히 알려드릴까요?")
+    sess_c.messages.append(SimpleNamespace(role="assistant", text="📌 의료급여\n· 대상: ...", kind="card"))
+    assert _offered_service(sess_c) == "의료급여"
     # 제안 문형이 아니면 None
     assert _offered_service(_sess("오늘 날씨가 참 좋네요.")) is None
 

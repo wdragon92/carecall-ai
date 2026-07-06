@@ -209,10 +209,19 @@ def _offer_candidate(sess) -> str | None:
     return None
 
 
+# 보미의 제안 문형 — "알려드릴까요?"뿐 아니라 "자세히 알려드릴게요" 류도 (실측: LLM 표현 변주)
+_OFFER_PHRASE = re.compile(r"알려\s*드릴(?:까요|게요)|안내해\s*드릴(?:까요|게요)|여쭤볼까요|설명해\s*드릴(?:까요|게요)")
+
+
 def _last_offer_text(sess) -> str | None:
-    """직전 보미 발화가 복지 제안("알려드릴까요?")이었으면 그 발화 원문."""
-    last_ai = next((m for m in reversed(sess.messages) if m.role == "assistant"), None)
-    if last_ai is not None and "알려드릴까요" in last_ai.text:
+    """직전 보미 '발화'가 복지 제안이었으면 그 발화 원문 (카드 말풍선은 건너뜀 —
+    카드가 턴의 마지막 메시지로 붙는 구조라, 카드를 보면 제안을 놓친다)."""
+    last_ai = next(
+        (m for m in reversed(sess.messages)
+         if m.role == "assistant" and getattr(m, "kind", "text") != "card"),
+        None,
+    )
+    if last_ai is not None and _OFFER_PHRASE.search(last_ai.text):
         return last_ai.text
     return None
 
@@ -388,9 +397,9 @@ async def handle_turn(sess, providers, settings) -> None:
         if oq:
             queries.append(oq)
         if _INFO_REQ.search(user_text) or oq:
-            cand = _offer_candidate(sess)
-            if cand and cand not in queries:
-                queries.append(cand)
+            for cand in (_offer_candidate(sess), (sess.last_rag or {}).get("서비스명")):
+                if cand and cand not in queries:
+                    queries.append(cand)  # 패널 후보 → 직전 카드 서비스(상세 요청 해석)
         for q in queries:
             card_ctx = await _rag_lookup(sess, providers, settings, q)
             if card_ctx:
