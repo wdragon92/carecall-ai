@@ -77,7 +77,7 @@ class Settings(BaseSettings):
     clova_chat_model: str = "HCX-005"  # 채팅용 — 빠른 스트리밍
     clova_tts_voice: str = "vmikyung"
     clova_tts_speed: int = 0  # -5(빠름)~10(느림), 0=기본
-    clova_tts_question_pitch: int = 2  # '?'로 끝나는 문장 끝음 올림(-5~5, 0=끔)
+    clova_tts_question_pitch: int = 0  # '?' 문장 끝음 올림(-5~5). 기본 0=끔 — 청취 결과 원음 유지 선택
     max_upload_mb: int = 5
     session_ttl_min: int = 120
     log_level: str = "INFO"
