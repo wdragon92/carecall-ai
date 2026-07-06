@@ -61,6 +61,51 @@ async def health(request: Request) -> dict:
     }
 
 
+@router.post("/api/rag/answer")
+async def rag_answer_once(request: Request) -> dict:
+    """RAG 단건 질의 (v2 §4-8) — 데모·평가용. 세션 없이 curl로 검증 가능."""
+    from app.core import prompts
+    from app.rag.answer import REJECT_ANSWER, compose_card, pick_card, rag_prompt_block, refresh_detail, retrieve_for
+
+    providers = request.app.state.providers
+    s = request.app.state.settings
+    body = await request.json()
+    question = ((body or {}).get("question") or "").strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="question required")
+    if providers.rag is None:
+        raise HTTPException(status_code=503, detail="rag index not loaded (build_index.py 실행 필요)")
+
+    try:
+        retrieved, top, thr = await retrieve_for(providers, s, question)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"embed failed: {exc}")
+
+    if not retrieved or top < thr:
+        return {"answer": REJECT_ANSWER, "rejected": True, "top_score": round(top, 3),
+                "threshold": thr, "sources": [], "card": None, "live": False}
+
+    system = prompts.chat_system(rag_prompt_block(retrieved), rag=True)
+    messages = [{"role": "system", "content": system}, {"role": "user", "content": question}]
+    try:
+        answer = await providers.llm.chat(messages, max_tokens=500, temperature=0.5, top_p=0.8)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("rag answer llm failed (%s) → mock", exc)
+        answer = await providers.mllm.chat(messages, max_tokens=500)
+
+    card_text, live = None, False
+    chunk = pick_card(retrieved, answer)
+    if chunk is not None:
+        fields, live = await refresh_detail(s, chunk)
+        card_text, _tts = compose_card(chunk, fields, live)
+
+    return {
+        "answer": answer, "rejected": False, "top_score": round(top, 3), "threshold": thr,
+        "sources": [{"source": c.source, "rrf": round(sc, 4)} for c, sc in retrieved],
+        "card": card_text, "live": live,
+    }
+
+
 @router.post("/api/rag/reload")
 async def rag_reload(request: Request) -> dict:
     """재빌드(build_index.py) 후 무중단 인덱스 교체 — 발표 당일 갱신용."""
@@ -147,7 +192,8 @@ async def synth_tts(sid: str, request: Request):
         msg = next((m for m in sess.messages if m.id == message_id and m.role == "assistant"), None)
         if msg is None or not msg.text.strip():
             raise HTTPException(status_code=404, detail="message not found")
-        text = _clean_for_tts(msg.text)
+        # 정보 카드(📌)는 원문 대신 짧은 안내문(tts_text)을 읽는다 — 수치·기호 낭독 방지
+        text = _clean_for_tts(msg.tts_text or msg.text)
         try:
             audio = await providers.tts.synthesize(text)
         except Exception as exc:  # noqa: BLE001

@@ -27,6 +27,9 @@ class Session:
         self.messages: list[Message] = []
         self.findings: list[Finding] = []
         self.welfare_matched: list[str] = []
+        self.welfare_cards: "OrderedDict[str, dict]" = OrderedDict()  # RAG로 안내한 복지 (패널·리포트 병합용)
+        self.last_rag: dict | None = None  # 직전 RAG 매칭 {"서비스명", "serv_id"} — 후속 질문 보강
+        self.slots: dict = {}  # 판정용 슬롯(나이·가구형태 등, P3)
         self.ocr_texts: list[str] = []
         self.tts_cache: "OrderedDict[str, bytes]" = OrderedDict()
         self.extract_lock = asyncio.Lock()
@@ -59,10 +62,13 @@ class Session:
         task.add_done_callback(self.bg_tasks.discard)
         return task
 
-    def add_message(self, role: str, text: str, via: str = "text", id: str | None = None) -> Message:
+    def add_message(
+        self, role: str, text: str, via: str = "text", id: str | None = None,
+        tts_text: str | None = None,
+    ) -> Message:
         self._mcount += 1
         mid = id or f"m{self._mcount}-{secrets.token_hex(3)}"
-        msg = Message(id=mid, role=role, text=text, via=via)
+        msg = Message(id=mid, role=role, text=text, via=via, tts_text=tts_text)
         self.messages.append(msg)
         self.touch()
         return msg

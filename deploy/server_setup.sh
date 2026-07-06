@@ -19,6 +19,12 @@ python3 -m venv .venv
 ./.venv/bin/pip install --upgrade pip -q
 ./.venv/bin/pip install -r requirements.txt
 
+echo "== [2.5/4] RAG 인덱스 빌드 (실 키가 .env에 있으면 real 임베딩) =="
+./.venv/bin/python build_index.py --source fixtures
+# 주 1회 자동 갱신(신선도) — 이미 등록돼 있으면 중복 추가하지 않음
+CRON_LINE="10 4 * * 1 cd $APP_DIR && ./.venv/bin/python build_index.py --source fixtures >> /var/log/carecall-index.log 2>&1 && curl -s -X POST http://127.0.0.1:8080/api/rag/reload > /dev/null"
+( crontab -l 2>/dev/null | grep -vF "build_index.py" ; echo "$CRON_LINE" ) | crontab -
+
 echo "== [3/4] systemd 서비스 등록 =="
 cp deploy/carecall.service /etc/systemd/system/carecall.service
 systemctl daemon-reload

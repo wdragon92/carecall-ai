@@ -63,7 +63,18 @@ ssh -i ~/.ssh/carecall_ed25519 root@$IP "APP_PUBLIC_IP=$IP bash /opt/carecall/de
 - HTTP : `http://<IP>:8080`
 - HTTPS: `https://<IP>.sslip.io`  ← **모바일 마이크(STT)는 이 https 주소에서 동작**
 ```bash
-curl -s http://$IP:8080/health
+curl -s http://$IP:8080/health   # providers 전부 real + rag.loaded:true 확인
+```
+
+## 7) 코드/인덱스 갱신 (운영 중)
+```bash
+# 코드 갱신 (requirements 변경 시 pip install 포함)
+ssh -i ~/.ssh/carecall_ed25519 root@$IP \
+  "cd /opt/carecall && git pull && ./.venv/bin/pip install -r requirements.txt -q && systemctl restart carecall"
+
+# RAG 인덱스만 갱신 (재시작 불필요 — 무중단 스왑; 주 1회 cron 자동 + 발표 전날 수동 1회)
+ssh -i ~/.ssh/carecall_ed25519 root@$IP \
+  "cd /opt/carecall && ./.venv/bin/python build_index.py --source fixtures && curl -s -X POST http://127.0.0.1:8080/api/rag/reload"
 ```
 
 ## 철수 (시연 후) — TEARDOWN.md 참고

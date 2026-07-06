@@ -8,6 +8,8 @@ import re
 from datetime import datetime
 
 from app.core import prompts, welfare
+from app.rag.answer import compose_card, pick_card, rag_prompt_block, refresh_detail
+from app.rag.search import augment_query, hybrid_retrieve
 from app.services.base import ProviderError
 
 log = logging.getLogger("conv")
@@ -58,8 +60,12 @@ async def _typing(sess, on: bool) -> None:
     await sess.send({"type": "ai_typing", "on": on})
 
 
-async def _speak(sess, providers, messages, max_tokens: int = 240, single: bool = False) -> str:
-    """AI 응답을 받아 말풍선 여러 개로 나눠 순차 전송(타이핑 + 간격). 전체 텍스트 반환."""
+async def _speak(
+    sess, providers, messages, max_tokens: int = 240, single: bool = False,
+    card_ctx: dict | None = None, settings=None,
+) -> str:
+    """AI 응답을 받아 말풍선 여러 개로 나눠 순차 전송(타이핑 + 간격). 전체 텍스트 반환.
+    card_ctx가 있으면 T2 정보 카드(kind:card)를 같은 턴 마지막 말풍선으로 붙인다."""
     await _typing(sess, True)
     full = ""
     try:
@@ -83,6 +89,26 @@ async def _speak(sess, providers, messages, max_tokens: int = 240, single: bool 
     for seg in segs:
         msg = sess.add_message("assistant", seg)
         bubbles.append({"id": msg.id, "text": seg})
+
+    if card_ctx and settings is not None:
+        try:  # 카드 실패가 턴을 깨지 않게
+            chunk = pick_card(card_ctx["retrieved"], full)
+            if chunk is not None:
+                fields, live = await refresh_detail(settings, chunk)
+                card_text, tts = compose_card(chunk, fields, live)
+                cmsg = sess.add_message("assistant", card_text, tts_text=tts)
+                bubbles.append({"id": cmsg.id, "text": card_text, "kind": "card"})
+                sess.last_rag = {"서비스명": fields.get("서비스명", ""), "serv_id": chunk.serv_id}
+                sess.welfare_cards[chunk.serv_id] = {
+                    "id": chunk.serv_id,
+                    "이름": fields.get("서비스명", ""),
+                    "한줄": fields.get("지원내용", "") or fields.get("지원대상", ""),
+                    "신청처": fields.get("신청방법", ""),
+                    "기준일": chunk.collected_at,
+                }
+        except Exception as exc:  # noqa: BLE001
+            log.warning("card compose failed (%s) — 답변만 전송", exc)
+
     await _typing(sess, False)
     await sess.send({"type": "ai_turn", "bubbles": bubbles})
     return full
@@ -102,13 +128,39 @@ async def greet(sess) -> None:
     await sess.send({"type": "ai_turn", "bubbles": [{"id": msg.id, "text": text}]})
 
 
+async def _rag_lookup(sess, providers, settings, user_text: str) -> dict | None:
+    """RAG 게이트 (v2 §3 트리거 A): 항상 로컬 검색을 시도하되, 벡터 top_score가
+    임계값 미만이면 None(일반 수다 경로). 임베딩 장애도 조용히 수다 경로로."""
+    rt = providers.rag
+    if rt is None or not settings.rag_enabled or not user_text.strip():
+        return None
+    try:
+        q = augment_query(user_text, (sess.last_rag or {}).get("서비스명"))
+        qvec = (await providers.embed.embed([q]))[0]
+    except Exception as exc:  # noqa: BLE001 — 임베딩 실패로 턴을 깨지 않는다
+        log.warning("rag embed failed (%s) → chit-chat path", exc)
+        return None
+    retrieved, top = hybrid_retrieve(rt, qvec, q, k=settings.rag_top_k, pool=settings.rag_pool)
+    thr = settings.rag_threshold(providers.modes.get("embed", "mock"))
+    log.info("rag lookup top=%.3f thr=%.2f q=%s", top, thr, q[:40])
+    if not retrieved or top < thr:
+        return None
+    return {"retrieved": retrieved, "block": rag_prompt_block(retrieved), "top": top}
+
+
 async def handle_turn(sess, providers, settings) -> None:
     last = sess.messages[-1] if sess.messages else None
-    bc = bool(last and last.role == "user" and _is_backchannel(last.text))
-    system = prompts.chat_system(welfare.get_digest(), backchannel=bc)
+    user_text = last.text if last and last.role == "user" else ""
+    bc = bool(last and last.role == "user" and _is_backchannel(user_text))
+
+    card_ctx = None if bc else await _rag_lookup(sess, providers, settings, user_text)
+    if card_ctx:
+        system = prompts.chat_system(card_ctx["block"], backchannel=bc, rag=True)
+    else:
+        system = prompts.chat_system(welfare.get_digest(), backchannel=bc)
     messages = [{"role": "system", "content": system}] + sess.history_for_llm()
     # 복지 안내처럼 긴 정보가 목록 중간에 잘리지 않도록 여유 있게. 평소 답의 길이는 프롬프트가 통제.
-    await _speak(sess, providers, messages, max_tokens=600)
+    await _speak(sess, providers, messages, max_tokens=600, card_ctx=card_ctx, settings=settings)
     _spawn_extract(sess, providers)  # 비동기 추출
 
 

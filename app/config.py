@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     rag_top_k: int = 4
     rag_pool: int = 20
     rag_score_threshold: float = 0.41       # 실 임베딩(bge-m3 코사인) 거부 임계값 — 실측 in 0.42~/out ~0.40, P4에서 재튜닝
-    rag_score_threshold_mock: float = 0.15  # 목 n-gram 벡터는 분포가 달라 별도 임계값
+    rag_score_threshold_mock: float = 0.06  # 목 n-gram 벡터용 — 실측 in 0.064~/out ~0.054의 중간
     rag_rewrite: bool = False               # LLM 질문 재작성(실모드 전용, 기본 off — 지연 1콜 추가)
 
     # 공공데이터포털 (P0 후 채움 — 발급은 사용자, Decoding 키만)

@@ -23,6 +23,7 @@ class Message(BaseModel):
     text: str
     ts: datetime = Field(default_factory=_utcnow)
     via: Via = "text"
+    tts_text: Optional[str] = None  # 있으면 TTS는 text 대신 이 문장을 읽음(정보 카드용)
 
 
 class Finding(BaseModel):

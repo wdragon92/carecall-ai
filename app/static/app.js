@@ -114,10 +114,10 @@ function appendSystemNote(text) {
   scrollDown();
   return row;
 }
-function appendAiBubble(text) {
+function appendAiBubble(text, kind) {
   const row = rowFor("ai");
   const div = document.createElement("div");
-  div.className = "bubble bubble-ai";
+  div.className = "bubble bubble-ai" + (kind === "card" ? " bubble-card" : "");
   div.textContent = text;
   row.appendChild(div);
   chatLog().appendChild(row);
@@ -181,7 +181,8 @@ function renderWelfare(items) {
     el.className = "card newcard";
     el.innerHTML = `<div class="font-semibold text-blue-700">🤝 ${escapeHtml(it["이름"])}</div>
       <div class="mt-1 text-sm text-gray-700">${escapeHtml(it["한줄"] || "")}</div>
-      <div class="mt-1 text-xs text-gray-500">신청: ${escapeHtml(it["신청처"] || "복지로(129)·주민센터")}</div>`;
+      <div class="mt-1 text-xs text-gray-500">신청: ${escapeHtml(it["신청처"] || "복지로(129)·주민센터")}</div>
+      ${it["기준일"] ? `<div class="mt-0.5 text-xs text-gray-400">정보 기준일 ${escapeHtml(it["기준일"])}</div>` : ""}`;
     box.appendChild(el);
   }
   flashMobileBadge();
@@ -414,7 +415,7 @@ async function revealTurn(bubbles) {
     await _sleep(Math.min(900, 280 + bubbles[i].text.length * 11)); // '입력 중' 짧은 뜸
     if (myTurn !== _turn) { hideTyping(); return; }
     hideTyping();
-    appendAiBubble(bubbles[i].text);
+    appendAiBubble(bubbles[i].text, bubbles[i].kind);
     if (useVoice && state.voiceOn && !state.recording) {
       const blob = await blobs[i];
       if (myTurn !== _turn) return;
@@ -429,7 +430,7 @@ async function revealTurn(bubbles) {
 /* ================= 종료 리포트 ================= */
 async function endSession() {
   $("#btn-end").disabled = true;
-  setBadge("상담을 정리하고 있어요…");
+  setBadge("오늘 이야기를 정리하고 있어요…");
   try {
     const r = await fetch(`/api/sessions/${state.sessionId}/end`, { method: "POST" });
     const d = await r.json();
@@ -438,7 +439,7 @@ async function endSession() {
     toast("리포트를 만들지 못했어요.");
   } finally {
     $("#btn-end").disabled = false;
-    setBadge("상담 진행 중");
+    setBadge("봄이가 곁에 있어요");
   }
 }
 function renderReport(rep) {
@@ -516,10 +517,10 @@ function flashMobileBadge() {
 /* ================= 유틸 ================= */
 function setBadge(t) { $("#mode-badge").textContent = t; }
 function showModes(p) {
-  if (!p) return setBadge("상담 진행 중");
+  if (!p) return setBadge("봄이가 곁에 있어요");
   const allReal = Object.values(p).every((v) => v === "real");
-  setBadge(allReal ? "실시간 연동 상담 중" : "상담 진행 중 (일부 데모)");
-  $("#mode-badge").title = `LLM:${p.llm} STT:${p.stt} TTS:${p.tts} OCR:${p.ocr}`;
+  setBadge(allReal ? "봄이가 듣고 있어요 (실시간 연동)" : "봄이가 듣고 있어요 (일부 데모)");
+  $("#mode-badge").title = `LLM:${p.llm} STT:${p.stt} TTS:${p.tts} OCR:${p.ocr} EMB:${p.embed || "-"}`;
 }
 function escapeHtml(s) {
   return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
