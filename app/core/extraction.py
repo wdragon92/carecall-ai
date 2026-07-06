@@ -46,6 +46,17 @@ def _merge(safety_findings: list[Finding], llm_findings: list[Finding]) -> list[
     return merged
 
 
+async def _send_alert(sess, level: str, message: str) -> None:
+    """경보 전송 + 동일 경보 재전송 억제 — 추출이 누적 대화 전체를 매번 스캔하므로
+    위험 발화 '이후 모든 턴'에 같은 배너가 재전송되던 문제(오경보 피로) 방지.
+    내용·수위가 달라진 경보는 정상 전송(프론트는 emergency→warning 강등만 무시)."""
+    cur = (level, message)
+    if getattr(sess, "last_alert", None) == cur:
+        return
+    sess.last_alert = cur
+    await sess.send({"type": "urgent_alert", "level": level, "message": message})
+
+
 async def trigger_extract(sess, providers) -> None:
     """코얼레싱: 실행 중이면 dirty만 세팅. 종료 시 dirty면 1회 더."""
     if sess.extract_lock.locked():
@@ -61,10 +72,13 @@ async def trigger_extract(sess, providers) -> None:
 async def flush_extract(sess, providers) -> None:
     """리포트 직전 '기다리는' flush — trigger_extract는 실행 중이면 dirty만 걸고
     즉시 반환하므로(코얼레싱), 종료 시점에 쓰면 진행 중 추출 결과가 리포트를
-    놓치는 경합이 생긴다(실측: 마지막 턴의 사기_노출이 리포트에서 유실)."""
+    놓치는 경합이 생긴다(실측: 마지막 턴의 사기_노출이 리포트에서 유실).
+    dirty 루프까지 소화해 flush 도중 끼어든 턴도 반영한다."""
     async with sess.extract_lock:  # 진행 중 추출이 있으면 끝날 때까지 대기
-        sess.extract_dirty = False
         await _run_once(sess, providers)
+        while sess.extract_dirty:
+            sess.extract_dirty = False
+            await _run_once(sess, providers)
 
 
 async def _run_once(sess, providers) -> None:
@@ -81,7 +95,7 @@ async def _run_once(sess, providers) -> None:
         await sess.send({"type": "findings_update", "findings": [_dump(f) for f in sess.findings]})
     level, message = safety.alert(kinds)
     if level:
-        await sess.send({"type": "urgent_alert", "level": level, "message": message})
+        await _send_alert(sess, level, message)
 
     # 2) LLM 추출 (느림) → 안전망과 병합해 갱신
     messages = [
@@ -124,7 +138,7 @@ async def _run_once(sess, providers) -> None:
             llm_flags.add("psych")
     level2, message2 = safety.alert(kinds, llm_flags)
     if level2 and level2 != level:
-        await sess.send({"type": "urgent_alert", "level": level2, "message": message2})
+        await _send_alert(sess, level2, message2)
 
     # 복지 매칭 — 패널 전송은 push_welfare 단일 지점(RAG 카드와 병합)
     signals = data.get("welfare_signals") if isinstance(data, dict) else None

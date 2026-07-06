@@ -45,6 +45,19 @@ _INFO_REQ = re.compile(r"알려|궁금|자세히|말해|들어보")
 # 이미 송금·이체가 일어난 정황(과거형) — 결정적 행동 카드 트리거
 _FRAUD_SENT = re.compile(r"보냈|보내 ?버렸|송금했|송금해 ?버렸|이체했|입금했|부쳤")
 
+# STT 오전사 정규화 — 라우팅(룰엔진·RAG)용. 화면 표기는 원문 유지.
+# 실측: "기소연금"이 룰엔진 감지를 빗나가 잘못된 접지→LLM이 신청기간을 지어냄
+_STT_ALIASES = (
+    ("기소연금", "기초연금"), ("기초년금", "기초연금"), ("기소 연금", "기초연금"),
+    ("노령년금", "노령연금"), ("기추연금", "기초연금"),
+)
+
+
+def _normalize_utterance(text: str) -> str:
+    for wrong, right in _STT_ALIASES:
+        text = text.replace(wrong, right)
+    return text
+
 
 def _accepts_offer(text: str) -> bool:
     """직전 복지 제안("알려드릴까요?")에 대한 수락 여부 — 짧은 긍정만 인정."""
@@ -107,6 +120,8 @@ async def _speak(
             log.error("mock chat failed too: %s", exc2)
             full = "아이고, 제가 잠깐 딴생각을 했네요. 다시 한 번 말씀해 주시겠어요?"
 
+    # 마크다운 강조가 발화에 새면 화면엔 별표, TTS엔 잡음 — 서식은 카드 전용
+    full = re.sub(r"\*{1,2}([^*\n]+)\*{1,2}", r"\1", full)
     segs = [full.strip()] if single else _segments(full)
     if not segs:
         segs = ["네, 듣고 있어요."]
@@ -181,9 +196,11 @@ async def greet(sess) -> None:
 _SEV_ORDER = {"높음": 0, "보통": 1, "낮음": 2}
 
 
-def _situation_memo(sess) -> str:
+def _situation_memo(sess, offer_hint: bool = True) -> str:
     """추출 파이프라인(HCX-007)이 쌓은 세션 상태를 대화(HCX-005) 컨텍스트로 요약.
-    보미가 같은 걸 두 번 묻지 않고, 감지된 복지 니즈를 다음 턴 화제에 자연스럽게 얹게 한다."""
+    보미가 같은 걸 두 번 묻지 않고, 감지된 복지 니즈를 다음 턴 화제에 자연스럽게 얹게 한다.
+    offer_hint=False: 이번 턴이 이미 접지(카드)됐으면 제안 힌트를 빼서
+    '카드는 치매치료비인데 힌트는 의료급여' 같은 교차 신호를 막는다."""
     parts: list[str] = []
     age, hh = sess.slots.get("age"), sess.slots.get("household")
     prof = []
@@ -199,7 +216,7 @@ def _situation_memo(sess) -> str:
     guided = [c.get("이름", "") for c in sess.welfare_cards.values() if c.get("이름")]
     if guided:
         parts.append("- 이미 안내한 복지: " + ", ".join(guided))
-    offer = _offer_candidate(sess)
+    offer = _offer_candidate(sess) if offer_hint else None
     if offer:
         parts.append(
             f"- 복지 제안 힌트: 대화 맥락상 '{offer}'가 도움이 될 수 있음. 흐름이 맞으면 "
@@ -385,7 +402,7 @@ async def _handle_screening(sess, providers, settings, fresh: bool) -> bool:
 
 async def handle_turn(sess, providers, settings) -> None:
     last = sess.messages[-1] if sess.messages else None
-    user_text = last.text if last and last.role == "user" else ""
+    user_text = _normalize_utterance(last.text) if last and last.role == "user" else ""
     bc = bool(last and last.role == "user" and _is_backchannel(user_text))
 
     # 판정 의도(트리거 C) — 명시 질문 또는 되묻기 진행 중이면 룰엔진 경로
@@ -427,11 +444,21 @@ async def handle_turn(sess, providers, settings) -> None:
     # 동일 턴 위험신호 주입 — 결정적 안전망(scan)은 즉시 계산되므로, 배너(비동기 추출)와
     # 별개로 '이번 답변'의 지침에도 반영한다 (예: 낙상 → 상태 확인 + 진료 권고를 자연스럽게)
     signal = ""
+    signal_level = ""
     action_card = None
     if not bc:
         hits = safety.scan(user_text)
         if hits:
             signal = " / ".join(dict.fromkeys(h["내용"] for h in hits))
+            kinds = {h["_kind"] for h in hits}
+            # 응대 강도 결정 — 응급·위기 턴은 발화 지침 자체가 달라야 한다
+            # (실측: 배너는 emergency인데 발화는 '심각하면 119' 조건부로 새는 이중 온도)
+            if "medical_emergency" in kinds:
+                signal_level = "emergency"
+            elif "suicide_acute" in kinds or "suicide_warning" in kinds:
+                signal_level = "suicide"
+            elif "fraud_exposure" in kinds:
+                signal_level = "fraud"
         # 이미 송금한 사기 피해: 위기번호·순서는 LLM 변주에 맡기지 않고 코드가 카드로 보장(T2 원칙)
         if any(h["_kind"] == "fraud_exposure" for h in hits) and _FRAUD_SENT.search(user_text):
             action_card = (
@@ -445,10 +472,12 @@ async def handle_turn(sess, providers, settings) -> None:
 
     system = prompts.chat_system(
         card_ctx["block"] if card_ctx else "",
-        memo=_situation_memo(sess),  # HCX-007 추출 결과를 대화 컨텍스트로 환류
+        # HCX-007 추출 결과 환류 — 접지 턴엔 제안 힌트 생략(카드와 교차 신호 방지)
+        memo=_situation_memo(sess, offer_hint=card_ctx is None),
         backchannel=bc,
         rag=bool(card_ctx),
         signal=signal,
+        signal_level=signal_level,
     )
     messages = [{"role": "system", "content": system}] + sess.history_for_llm()
     # 복지 안내처럼 긴 정보가 목록 중간에 잘리지 않도록 여유 있게. 평소 답의 길이는 프롬프트가 통제.
