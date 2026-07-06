@@ -47,7 +47,7 @@ class Settings(BaseSettings):
     rag_score_threshold_high: float = 0.55   # high — 어휘 증거 없이도 통과하는 고신뢰선
     rag_score_threshold_mock: float = 0.06   # 목 n-gram low (12장 픽스처 기준 실측)
     rag_score_threshold_mock_high: float = 0.12  # 목 high
-    rag_bm25_evidence: float = 12.0          # 어휘 증거 하한 (실 557청크 기준)
+    rag_bm25_evidence: float = 11.0          # 어휘 증거 하한 (senior 필터 후 347청크 기준 재튜닝 — eval_rag 실측: in 최저 11.5, top≥0.47인 out 최대 7.4)
     rag_bm25_evidence_mock: float = 4.0      # 목/소형 코퍼스용
     rag_item_min: float = 0.45               # 항목별 벡터 하한 — top4 고집 없이 기준 미달 제외
     rag_item_min_mock: float = 0.03
