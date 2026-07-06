@@ -216,7 +216,7 @@ function ragStatus(m) {
   } else if (m.status === "found") {
     chip.textContent = `📚 공식 복지자료 ${Number(m.hits) || 0}건에서 근거를 찾았어요`;
     wrap.classList.remove("hidden");
-    _chipTimer = setTimeout(() => wrap.classList.add("hidden"), 4000);
+    _chipTimer = setTimeout(() => wrap.classList.add("hidden"), 10000); // 어르신이 읽을 시간
   } else {
     wrap.classList.add("hidden");
   }

@@ -42,6 +42,8 @@ def _is_backchannel(text: str) -> bool:
 
 _DECLINE = re.compile(r"아니|괜찮|됐어|나중|말고|싫")
 _INFO_REQ = re.compile(r"알려|궁금|자세히|말해|들어보")
+# 이미 송금·이체가 일어난 정황(과거형) — 결정적 행동 카드 트리거
+_FRAUD_SENT = re.compile(r"보냈|보내 ?버렸|송금했|송금해 ?버렸|이체했|입금했|부쳤")
 
 
 def _accepts_offer(text: str) -> bool:
@@ -85,6 +87,7 @@ async def _typing(sess, on: bool) -> None:
 async def _speak(
     sess, providers, messages, max_tokens: int = 240, single: bool = False,
     card_ctx: dict | None = None, settings=None,
+    action_card: tuple[str, str] | None = None,
 ) -> str:
     """AI 응답을 받아 말풍선 여러 개로 나눠 순차 전송(타이핑 + 간격). 전체 텍스트 반환.
     card_ctx가 있으면 T2 정보 카드(kind:card)를 같은 턴 마지막 말풍선으로 붙인다."""
@@ -149,6 +152,11 @@ async def _speak(
                 await welfare.push_welfare(sess)  # 패널도 즉시 갱신 (RAG 카드 우선 병합)
         except Exception as exc:  # noqa: BLE001
             log.warning("card compose failed (%s) — 답변만 전송", exc)
+
+    if action_card is not None:  # 결정적 행동 카드(위기번호 등 — LLM 변주와 무관하게 보장)
+        atext, atts = action_card
+        amsg = sess.add_message("assistant", atext, kind="card", tts_text=atts)
+        bubbles.append({"id": amsg.id, "text": atext, "kind": "card"})
 
     await _typing(sess, False)
     await sess.send({"type": "ai_turn", "bubbles": bubbles})
@@ -419,10 +427,21 @@ async def handle_turn(sess, providers, settings) -> None:
     # 동일 턴 위험신호 주입 — 결정적 안전망(scan)은 즉시 계산되므로, 배너(비동기 추출)와
     # 별개로 '이번 답변'의 지침에도 반영한다 (예: 낙상 → 상태 확인 + 진료 권고를 자연스럽게)
     signal = ""
+    action_card = None
     if not bc:
         hits = safety.scan(user_text)
         if hits:
             signal = " / ".join(dict.fromkeys(h["내용"] for h in hits))
+        # 이미 송금한 사기 피해: 위기번호·순서는 LLM 변주에 맡기지 않고 코드가 카드로 보장(T2 원칙)
+        if any(h["_kind"] == "fraud_exposure" for h in hits) and _FRAUD_SENT.search(user_text):
+            action_card = (
+                "🚨 지금 바로 하실 일\n"
+                "① 경찰 112에 신고하세요.\n"
+                "② 돈을 보낸 은행 고객센터에 '지급정지'를 요청하세요.\n"
+                "③ 막막하시면 금융감독원 1332가 도와드려요.\n"
+                "빠를수록 돈을 지킬 가능성이 커져요. 어르신 잘못이 아니에요.",
+                "지금 바로 경찰 일일이에 신고하시고, 은행에 지급정지를 요청하세요. 순서는 화면에 적어 드렸어요.",
+            )
 
     system = prompts.chat_system(
         card_ctx["block"] if card_ctx else "",
@@ -433,7 +452,8 @@ async def handle_turn(sess, providers, settings) -> None:
     )
     messages = [{"role": "system", "content": system}] + sess.history_for_llm()
     # 복지 안내처럼 긴 정보가 목록 중간에 잘리지 않도록 여유 있게. 평소 답의 길이는 프롬프트가 통제.
-    await _speak(sess, providers, messages, max_tokens=600, card_ctx=card_ctx, settings=settings)
+    await _speak(sess, providers, messages, max_tokens=600, card_ctx=card_ctx, settings=settings,
+                 action_card=action_card)
     _spawn_extract(sess, providers)  # 비동기 추출
 
 

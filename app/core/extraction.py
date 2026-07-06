@@ -58,6 +58,15 @@ async def trigger_extract(sess, providers) -> None:
             await _run_once(sess, providers)
 
 
+async def flush_extract(sess, providers) -> None:
+    """리포트 직전 '기다리는' flush — trigger_extract는 실행 중이면 dirty만 걸고
+    즉시 반환하므로(코얼레싱), 종료 시점에 쓰면 진행 중 추출 결과가 리포트를
+    놓치는 경합이 생긴다(실측: 마지막 턴의 사기_노출이 리포트에서 유실)."""
+    async with sess.extract_lock:  # 진행 중 추출이 있으면 끝날 때까지 대기
+        sess.extract_dirty = False
+        await _run_once(sess, providers)
+
+
 async def _run_once(sess, providers) -> None:
     transcript = sess.user_transcript()
     if not transcript.strip():

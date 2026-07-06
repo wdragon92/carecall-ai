@@ -265,11 +265,11 @@ async def end_session(sid: str, request: Request) -> dict:
     if sess is None:
         raise HTTPException(status_code=404, detail="session not found")
 
-    # 리포트 전 특이사항 1회 flush (최신 상태 반영)
+    # 리포트 전 특이사항 flush — 진행 중 추출이 있으면 끝나길 기다린 뒤 1회 더 (경합 방지)
     try:
-        from app.core.extraction import trigger_extract
+        from app.core.extraction import flush_extract
 
-        await trigger_extract(sess, providers)
+        await flush_extract(sess, providers)
     except Exception as exc:  # noqa: BLE001
         log.warning("pre-report extract failed: %s", exc)
 

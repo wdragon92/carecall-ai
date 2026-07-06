@@ -73,6 +73,18 @@ def test_idiom_not_suicide_false_positive():
         assert "suicide_acute" not in kinds and "suicide_warning" not in kinds, utter
 
 
+def test_fraud_deterministic_rule():
+    """사기 탐지는 LLM 전용이면 안 된다 — 결정적 규칙 병행 (리포트 유실 실측)."""
+    kinds = {d["_kind"] for d in safety.scan("아들인 줄 알고 30만원을 보냈는데 아무래도 사기 같아")}
+    assert "fraud_exposure" in kinds
+    level, msg = safety.alert(kinds)
+    assert level == "warning" and "112" in msg and "1332" in msg
+    cats = {d["카테고리"] for d in safety.scan("검찰이라면서 전화가 왔어")}
+    assert "사기_노출" in cats
+    # 부정문 가드
+    assert all(d["_kind"] != "fraud_exposure" for d in safety.scan("사기 같지는 않았어"))
+
+
 def test_phrase_variants_from_matrix_audit():
     """테스트 카탈로그 감사에서 발견된 어순·활용 변형 공백 보강."""
     kinds = {d["_kind"] for d in safety.scan("변이 새까만 게 짜장 같아")}

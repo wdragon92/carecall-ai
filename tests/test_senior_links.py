@@ -141,6 +141,29 @@ def test_offered_service_from_last_ai_message():
     assert _offered_service(_sess("오늘 날씨가 참 좋네요.")) is None
 
 
+def test_fraud_sent_action_card_via_ws(rag_client):
+    """송금 완료 사기 정황 → 같은 턴에 결정적 행동 카드(112·지급정지·1332) 보장."""
+    import json as _json
+
+    sid = rag_client.post("/api/sessions").json()["session_id"]
+    with rag_client.websocket_connect(f"/ws/{sid}") as ws:
+        assert ws.receive_json()["type"] == "session_ready"
+        for _ in range(10):
+            if ws.receive_json()["type"] == "ai_turn":
+                break
+        ws.send_text(_json.dumps({"type": "user_message", "text": "보이스피싱인 것 같은데 아까 돈을 보냈어", "via": "text"}))
+        bubbles = []
+        for _ in range(20):
+            m = ws.receive_json()
+            if m.get("type") == "ai_turn":
+                bubbles = m["bubbles"]
+                break
+        cards = [b for b in bubbles if b.get("kind") == "card"]
+        assert cards, bubbles
+        joined = " ".join(b["text"] for b in cards)
+        assert "112" in joined and "지급정지" in joined and "1332" in joined
+
+
 def test_situation_memo_mentions_offer_hint():
     sess = _sess("네, 듣고 있어요.", matched=["care-service"])
     memo = _situation_memo(sess)
