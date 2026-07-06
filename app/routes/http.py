@@ -106,6 +106,29 @@ async def rag_answer_once(request: Request) -> dict:
     }
 
 
+@router.post("/api/rag/screen")
+async def rag_screen(request: Request) -> dict:
+    """룰엔진 단건 판정 (v2 §4-8) — slots {age, household, income}. 데모·검증용."""
+    from app.rag.apply import build_apply_package
+    from app.rag.rules import BASIC_PENSION_2026, check_basic_pension
+
+    body = await request.json()
+    slots = (body or {}).get("slots") or {}
+    verdict, ment = check_basic_pension(slots.get("age"), slots.get("household"), slots.get("income"))
+    pkg = None
+    age = slots.get("age") or 0
+    if verdict in ("가능성높음", "확인필요") and age >= BASIC_PENSION_2026["age_min"]:
+        providers = request.app.state.providers
+        chunk = next(
+            (c for c in (providers.rag.chunks if providers.rag else [])
+             if (c.fields or {}).get("서비스명") == "기초연금"),
+            None,
+        )
+        fields = chunk.fields if chunk else {"서비스명": "기초연금", "신청방법": "주민센터, 복지로(온라인), 국민연금공단"}
+        pkg = build_apply_package(fields, chunk.collected_at if chunk else "", chunk.url if chunk else "")
+    return {"판정": verdict, "근거": ment, "apply_package": pkg}
+
+
 @router.post("/api/rag/reload")
 async def rag_reload(request: Request) -> dict:
     """재빌드(build_index.py) 후 무중단 인덱스 교체 — 발표 당일 갱신용."""

@@ -29,7 +29,8 @@ class Session:
         self.welfare_matched: list[str] = []
         self.welfare_cards: "OrderedDict[str, dict]" = OrderedDict()  # RAG로 안내한 복지 (패널·리포트 병합용)
         self.last_rag: dict | None = None  # 직전 RAG 매칭 {"서비스명", "serv_id"} — 후속 질문 보강
-        self.slots: dict = {}  # 판정용 슬롯(나이·가구형태 등, P3)
+        self.slots: dict = {}  # 판정용 슬롯(나이·가구형태 등) + _pending 카운터
+        self.apply_packages: dict[str, dict] = {}  # 안내한 신청 패키지 (리포트 첨부)
         self.ocr_texts: list[str] = []
         self.tts_cache: "OrderedDict[str, bytes]" = OrderedDict()
         self.extract_lock = asyncio.Lock()

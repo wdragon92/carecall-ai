@@ -1,36 +1,7 @@
-"""P2 통합: WS 턴에서 RAG 게이트 → 정보 카드(kind:card) 말풍선 + TTS 대체문 (전부 목)."""
-import asyncio
-
-import pytest
-
-from app.rag import cards
-from app.rag.index import build_index, save_index
-from app.services.mock import MockEmbed
+"""P2 통합: WS 턴에서 RAG 게이트 → 정보 카드(kind:card) 말풍선 + TTS 대체문 (전부 목).
+rag_client 픽스처는 conftest.py 공용."""
 
 ALIEN_Q = "asdf qwer zxcv 1234"  # 문서 밖 — 목 벡터에서도 확실히 저점수
-
-
-@pytest.fixture
-def rag_client(tmp_path, monkeypatch):
-    """목 임베딩으로 빌드한 인덱스를 쓰는 앱 클라이언트 (RAG on)."""
-    embed = MockEmbed()
-    cs = cards.fixture_cards()
-    loaded, st = asyncio.run(build_index(cs, embed.embed, None, "mock", sleep_s=0))
-    save_index(loaded, tmp_path, st)
-
-    monkeypatch.setenv("RAG_DATA_DIR", str(tmp_path))
-    from app.config import get_settings
-
-    get_settings.cache_clear()
-    try:
-        from starlette.testclient import TestClient
-
-        from app.main import create_app
-
-        with TestClient(create_app()) as c:
-            yield c
-    finally:
-        get_settings.cache_clear()  # 다른 테스트가 tmp 경로를 물려받지 않게
 
 
 def _next_ai_turn(ws, tries: int = 12) -> list[dict]:

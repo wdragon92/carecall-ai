@@ -448,12 +448,14 @@ function renderReport(rep) {
     .map((f) => `<li class="mb-1"><b>${escapeHtml(f.category.replace("_", " "))}</b> (${f.severity}) — ${escapeHtml(f.content)}${f.needs_human ? " 👤" : ""}</li>`)
     .join("");
   const recs = (rep.recommendations || []).map((r) => `<li class="mb-1">✅ ${escapeHtml(r)}</li>`).join("");
-  const welfare = (rep.welfare || []).map((w) => `<li class="mb-1">🤝 ${escapeHtml(w["이름"])} — <span class="text-gray-500 text-sm">${escapeHtml(w["신청처"] || "")}</span></li>`).join("");
+  const welfare = (rep.welfare || []).map((w) => `<li class="mb-1">🤝 ${escapeHtml(w["이름"])} — <span class="text-gray-500 text-sm">${escapeHtml(w["신청처"] || "")}${w["기준일"] ? " · " + escapeHtml(w["기준일"]) + " 기준" : ""}</span></li>`).join("");
+  const pkgs = (rep.apply_packages || []).map((p) => `<li class="mb-1">📝 ${escapeHtml(p["서비스명"])} — ${escapeHtml((p["필요서류"] || []).join(", "))} <span class="text-gray-500 text-sm">(${escapeHtml(p["신청처"] || "")})</span></li>`).join("");
   b.innerHTML = `
     <div><h3 class="font-bold mb-1">요약</h3><p class="text-gray-700">${escapeHtml(rep.summary || "")}</p></div>
     <div><h3 class="font-bold mb-1">관찰된 특이사항</h3><ul class="list-none">${findings || '<li class="text-gray-400">없음</li>'}</ul></div>
     <div><h3 class="font-bold mb-1">후속 권고</h3><ul class="list-none">${recs || '<li class="text-gray-400">없음</li>'}</ul></div>
     ${welfare ? `<div><h3 class="font-bold mb-1">안내한 복지</h3><ul class="list-none">${welfare}</ul></div>` : ""}
+    ${pkgs ? `<div><h3 class="font-bold mb-1">신청 준비물</h3><ul class="list-none">${pkgs}</ul></div>` : ""}
     <p class="text-xs text-gray-400">${escapeHtml(rep.disclaimer || "")}</p>`;
   $("#report-modal").classList.remove("hidden");
 }

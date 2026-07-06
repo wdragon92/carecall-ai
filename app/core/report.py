@@ -71,6 +71,7 @@ async def generate_report(sess, providers) -> dict:
         summary=summary,
         findings=sess.findings,
         recommendations=list(recs),
-        welfare=welfare.by_ids(sess.welfare_matched),
+        welfare=welfare.merged_for_report(sess),  # RAG로 안내한 카드(기준일 포함) + 정적 매칭
+        apply_packages=list(sess.apply_packages.values()),
     )
     return report.model_dump()

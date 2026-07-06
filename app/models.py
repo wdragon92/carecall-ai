@@ -55,4 +55,5 @@ class Report(BaseModel):
     findings: list[Finding] = Field(default_factory=list)
     recommendations: list[str] = Field(default_factory=list)
     welfare: list[dict] = Field(default_factory=list)
+    apply_packages: list[dict] = Field(default_factory=list)  # 안내한 신청 준비물(§4-7)
     disclaimer: str = "본 내용은 참고용이며 의학적 진단이 아닙니다. 정확한 상담은 전문가에게 문의하세요."

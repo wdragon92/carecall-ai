@@ -108,9 +108,10 @@ async def _run_once(sess, providers) -> None:
     if level2 and level2 != level:
         await sess.send({"type": "urgent_alert", "level": level2, "message": message2})
 
-    # 복지 매칭
+    # 복지 매칭 — 패널 전송은 push_welfare 단일 지점(RAG 카드와 병합)
     signals = data.get("welfare_signals") if isinstance(data, dict) else None
     matched = welfare.match(signals or [], transcript)
     if matched:
         sess.welfare_matched = [m["id"] for m in matched]
-        await sess.send({"type": "welfare_update", "items": matched})
+    if matched or sess.welfare_cards:
+        await welfare.push_welfare(sess)

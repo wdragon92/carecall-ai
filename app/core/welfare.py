@@ -43,6 +43,30 @@ def by_ids(ids: list[str]) -> list[dict]:
     return out
 
 
+async def push_welfare(sess, limit: int = 5) -> None:
+    """복지 패널 갱신 단일 지점 — RAG 카드(근거·기준일 보유) 우선 + 정적 매칭 병합.
+    추출/RAG 두 소스가 패널을 번갈아 덮어쓰는 깜빡임을 없앤다."""
+    items: list[dict] = list(sess.welfare_cards.values())
+    names = {it.get("이름") for it in items}
+    for st in by_ids(sess.welfare_matched):
+        if st["이름"] not in names:
+            items.append(st)
+            names.add(st["이름"])
+    if items:
+        await sess.send({"type": "welfare_update", "items": items[:limit]})
+
+
+def merged_for_report(sess, limit: int = 6) -> list[dict]:
+    """리포트용 병합 — 대화에서 실제 안내한 RAG 카드 먼저, 그 뒤 정적 매칭."""
+    out: list[dict] = [dict(c) for c in sess.welfare_cards.values()]
+    names = {o.get("이름") for o in out}
+    for st in by_ids(sess.welfare_matched):
+        if st["이름"] not in names:
+            out.append(st)
+            names.add(st["이름"])
+    return out[:limit]
+
+
 def match(signals: list[str], text: str, limit: int = 5) -> list[dict]:
     """추출 신호 + 사용자 발화 키워드로 복지 항목 매칭 후 관련도 상위 N개.
     키워드 매칭(구체적)을 신호 매칭(광범위)보다 높게 가중해 targeted하게 추린다."""

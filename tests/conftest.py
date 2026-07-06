@@ -28,3 +28,28 @@ def client(app):
 
     with TestClient(app) as c:
         yield c
+
+
+@pytest.fixture
+def rag_client(tmp_path, monkeypatch):
+    """목 임베딩으로 빌드한 인덱스를 쓰는 앱 클라이언트 (RAG on)."""
+    import asyncio
+
+    from app.rag import cards
+    from app.rag.index import build_index, save_index
+    from app.services.mock import MockEmbed
+
+    embed = MockEmbed()
+    cs = cards.fixture_cards()
+    loaded, st = asyncio.run(build_index(cs, embed.embed, None, "mock", sleep_s=0))
+    save_index(loaded, tmp_path, st)
+
+    monkeypatch.setenv("RAG_DATA_DIR", str(tmp_path))
+    get_settings.cache_clear()
+    try:
+        from starlette.testclient import TestClient
+
+        with TestClient(create_app()) as c:
+            yield c
+    finally:
+        get_settings.cache_clear()  # 다른 테스트가 tmp 경로를 물려받지 않게

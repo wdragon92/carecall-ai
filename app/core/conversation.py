@@ -8,7 +8,9 @@ import re
 from datetime import datetime
 
 from app.core import prompts, welfare
+from app.rag import rules
 from app.rag.answer import compose_card, pick_card, rag_prompt_block, refresh_detail
+from app.rag.apply import build_apply_package, package_to_text
 from app.rag.search import augment_query, hybrid_retrieve
 from app.services.base import ProviderError
 
@@ -106,6 +108,7 @@ async def _speak(
                     "신청처": fields.get("신청방법", ""),
                     "기준일": chunk.collected_at,
                 }
+                await welfare.push_welfare(sess)  # 패널도 즉시 갱신 (RAG 카드 우선 병합)
         except Exception as exc:  # noqa: BLE001
             log.warning("card compose failed (%s) — 답변만 전송", exc)
 
@@ -148,10 +151,90 @@ async def _rag_lookup(sess, providers, settings, user_text: str) -> dict | None:
     return {"retrieved": retrieved, "block": rag_prompt_block(retrieved), "top": top}
 
 
+def _basic_pension_fields(providers) -> tuple[dict, str, str]:
+    """인덱스에서 기초연금 카드 필드를 찾음 (없으면 최소 폴백)."""
+    for c in providers.rag.chunks if providers.rag else []:
+        if (c.fields or {}).get("서비스명") == "기초연금":
+            return c.fields, c.collected_at, c.url
+    return {"서비스명": "기초연금", "신청방법": "주민센터, 복지로(온라인), 국민연금공단"}, "", ""
+
+
+async def _extract_slots(sess, providers) -> dict:
+    """슬롯 추출: LLM(실) → 실패·형식이상 시 정규식 폴백. 대상은 사용자 발화만."""
+    recent = "\n".join(m.text for m in sess.messages if m.role == "user")[-500:]
+    try:
+        data = await providers.llm.extract_json(
+            [{"role": "system", "content": rules.SLOT_SYSTEM}, {"role": "user", "content": recent}],
+            rules.SLOT_SCHEMA,
+        )
+        if isinstance(data, dict) and any(k in data for k in ("age", "household", "income")):
+            got = {k: data.get(k) for k in ("age", "household", "income")}
+            if any(v is not None for v in got.values()):
+                return got
+    except Exception as exc:  # noqa: BLE001
+        log.warning("slot extract llm failed (%s) → regex", exc)
+    return rules.slots_from_text(recent)
+
+
+async def _handle_screening(sess, providers, settings, fresh: bool) -> bool:
+    """트리거 C (v2 §4-6): 슬롯 수집 → 룰엔진(코드) 판정 → 멘트 + 신청 패키지 카드.
+    LLM은 슬롯 추출에만 쓰고 판정·수치는 결정론적. 처리했으면 True."""
+    prev = {k: v for k, v in sess.slots.items() if not k.startswith("_")}
+    got = await _extract_slots(sess, providers)
+    merged = rules.merge_slots(prev, got)
+    newly_filled = any(
+        prev.get(k) is None and merged.get(k) is not None for k in ("age", "household", "income")
+    )
+    if not fresh and not newly_filled:
+        return False  # 되묻기 중인데 새 정보가 없음(딴 얘기) → 일반 턴으로
+    sess.slots = merged
+    sess.slots["_pending"] = 0
+
+    age, household = sess.slots.get("age"), sess.slots.get("household")
+    verdict, ment = rules.check_basic_pension(age, household, sess.slots.get("income"))
+    asking = age is None or (age >= rules.BASIC_PENSION_2026["age_min"] and household is None)
+    if asking:
+        sess.slots["_pending"] = 2  # 다음 1~2턴은 답변(나이·가구)을 판정 문맥으로 받음
+
+    msg = sess.add_message("assistant", ment)
+    bubbles = [{"id": msg.id, "text": ment}]
+
+    if not asking and verdict in ("가능성높음", "확인필요"):
+        fields, collected_at, url = _basic_pension_fields(providers)
+        pkg = build_apply_package(fields, collected_at, url)
+        text = package_to_text(pkg)
+        cmsg = sess.add_message(
+            "assistant", text, tts_text="기초연금 신청에 필요한 것들을 화면에 카드로 정리해 드렸어요."
+        )
+        bubbles.append({"id": cmsg.id, "text": text, "kind": "card"})
+        sess.apply_packages["기초연금"] = pkg
+        sess.welfare_cards["fixture-basic-pension"] = {
+            "id": "fixture-basic-pension", "이름": "기초연금",
+            "한줄": fields.get("지원내용", "") or "만 65세 이상 소득 하위 어르신 연금",
+            "신청처": fields.get("신청방법", ""), "기준일": collected_at,
+        }
+        await welfare.push_welfare(sess)
+
+    await sess.send({"type": "ai_turn", "bubbles": bubbles})
+    log.info("screening verdict=%s slots=%s", verdict, {k: v for k, v in sess.slots.items()})
+    return True
+
+
 async def handle_turn(sess, providers, settings) -> None:
     last = sess.messages[-1] if sess.messages else None
     user_text = last.text if last and last.role == "user" else ""
     bc = bool(last and last.role == "user" and _is_backchannel(user_text))
+
+    # 판정 의도(트리거 C) — 명시 질문 또는 되묻기 진행 중이면 룰엔진 경로
+    if not bc:
+        fresh = rules.detect_screen_intent(user_text) is not None
+        pending = int(sess.slots.get("_pending", 0) or 0)
+        if fresh or pending > 0:
+            if not fresh:
+                sess.slots["_pending"] = pending - 1
+            if await _handle_screening(sess, providers, settings, fresh):
+                _spawn_extract(sess, providers)
+                return
 
     card_ctx = None if bc else await _rag_lookup(sess, providers, settings, user_text)
     if card_ctx:
