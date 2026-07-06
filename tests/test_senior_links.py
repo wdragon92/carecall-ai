@@ -141,6 +141,35 @@ def test_offered_service_from_last_ai_message():
     assert _offered_service(_sess("오늘 날씨가 참 좋네요.")) is None
 
 
+def test_crisis_hold_state_machine():
+    """위기 수위가 다음 2턴까지 유지된다 (D8 실측: 후속 턴 수면 강의 이탈 방지)."""
+    from app.core.conversation import _resolve_signal
+
+    sess = SimpleNamespace(crisis_hold=None)
+    sig, lvl, _ = _resolve_signal(sess, "요새 잠이 안 와서 약을 모아 두고 있다", bc=False)
+    assert lvl == "suicide" and sess.crisis_hold == ("suicide", 2)
+    sig, lvl, _ = _resolve_signal(sess, "그냥 그렇다고", bc=False)  # 무해 후속
+    assert lvl == "suicide" and "후속 국면" in sig and sess.crisis_hold == ("suicide", 1)
+    sig, lvl, _ = _resolve_signal(sess, "응", bc=True)  # 백채널도 유지
+    assert lvl == "suicide" and sess.crisis_hold == ("suicide", 0)
+    sig, lvl, _ = _resolve_signal(sess, "고향 얘기나 하자", bc=False)  # 만료
+    assert lvl == "" and sess.crisis_hold is None
+    # 새 위기 신호는 홀드를 재장전
+    sess2 = SimpleNamespace(crisis_hold=("suicide", 1))
+    sig, lvl, _ = _resolve_signal(sess2, "숨이 잘 안 쉬어져", bc=False)
+    assert lvl == "emergency" and sess2.crisis_hold == ("emergency", 2)
+
+
+def test_currency_scrubbed_when_card_present():
+    """접지 턴 발화의 금액은 카드로만 — LLM이 자료 블록 수치를 발화로 옮기면 걷어낸다 (K2/D10 실측)."""
+    import re as _re
+
+    text = "기초연금은 매달 지원돼요. 월 최대 약 34만 원 수준을 받을 수 있답니다."
+    scrubbed = _re.sub(r"(?:약\s*)?\d{1,3}(?:,\d{3})*\s*만\s*원(?:\s*수준|\s*정도)?",
+                       "화면 카드에 적어드린 금액", text)
+    assert "34만" not in scrubbed and "화면 카드에 적어드린 금액" in scrubbed
+
+
 def test_fraud_sent_action_card_via_ws(rag_client):
     """송금 완료 사기 정황 → 같은 턴에 결정적 행동 카드(112·지급정지·1332) 보장."""
     import json as _json

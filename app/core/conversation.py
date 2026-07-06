@@ -123,6 +123,11 @@ async def _speak(
 
     # 마크다운 강조가 발화에 새면 화면엔 별표, TTS엔 잡음 — 서식은 카드 전용
     full = re.sub(r"\*{1,2}([^*\n]+)\*{1,2}", r"\1", full)
+    if card_ctx is not None:
+        # T2 하드 가드: 접지 턴 발화의 금액은 카드로만 — 자료 블록의 수치를 LLM이
+        # 발화로 옮기는 누출("월 최대 약 34만 원…") 실측. 결정적으로 걷어낸다.
+        full = re.sub(r"(?:약\s*)?\d{1,3}(?:,\d{3})*\s*만\s*원(?:\s*수준|\s*정도)?",
+                      "화면 카드에 적어드린 금액", full)
     segs = [full.strip()] if single else _segments(full)
     if not segs:
         segs = ["네, 듣고 있어요."]
@@ -137,6 +142,13 @@ async def _speak(
         try:  # 카드 실패가 턴을 깨지 않게
             chunk = pick_card(card_ctx["retrieved"], full,
                               strict=providers.modes.get("llm") == "real")
+            if chunk is None and card_ctx.get("target"):
+                # 수락 체인의 결정적 타깃 폴백 (코드가 정한 서비스명 — LLM 발화 무관하게 안전)
+                chunk = next(
+                    (c for c, _ in card_ctx["retrieved"]
+                     if (c.fields or {}).get("서비스명") == card_ctx["target"]),
+                    None,
+                )
             if chunk is not None:
                 fields, live = await refresh_detail(settings, chunk)
                 card_text, tts = compose_card(chunk, fields, live)
@@ -408,6 +420,45 @@ async def _handle_screening(sess, providers, settings, fresh: bool) -> bool:
     return True
 
 
+def _resolve_signal(sess, user_text: str, bc: bool) -> tuple[str, str, tuple[str, str] | None]:
+    """이번 턴의 위험신호·응대 수위·결정적 행동 카드 결정.
+    - 응급/위기 수위는 다음 2턴까지 유지(crisis_hold) — "약을 모아두고 있어" 뒤의
+      "그냥 그렇다고" 턴에 수면 강의·작별 인사로 새는 실측 사고 방지.
+    - 송금 완료 사기엔 112·지급정지·1332 행동 카드를 코드가 보장(T2 원칙)."""
+    signal, signal_level, action_card = "", "", None
+    hits = safety.scan(user_text) if not bc else []
+    if hits:
+        signal = " / ".join(dict.fromkeys(h["내용"] for h in hits))
+        kinds = {h["_kind"] for h in hits}
+        if "medical_emergency" in kinds:
+            signal_level = "emergency"
+        elif "suicide_acute" in kinds or "suicide_warning" in kinds:
+            signal_level = "suicide"
+        elif "fraud_exposure" in kinds:
+            signal_level = "fraud"
+        if "fraud_exposure" in kinds and _FRAUD_SENT.search(user_text):
+            action_card = (
+                "🚨 지금 바로 하실 일\n"
+                "① 경찰 112에 신고하세요.\n"
+                "② 돈을 보낸 은행 고객센터에 '지급정지'를 요청하세요.\n"
+                "③ 막막하시면 금융감독원 1332가 도와드려요.\n"
+                "빠를수록 돈을 지킬 가능성이 커져요. 어르신 잘못이 아니에요.",
+                "지금 바로 경찰 일일이에 신고하시고, 은행에 지급정지를 요청하세요. 순서는 화면에 적어 드렸어요.",
+            )
+    if signal_level in ("emergency", "suicide"):
+        sess.crisis_hold = (signal_level, 2)
+    elif getattr(sess, "crisis_hold", None):
+        level, left = sess.crisis_hold
+        if left > 0:
+            if not signal_level:
+                signal_level = level
+                signal = "직전 위기 신호의 후속 국면 (새 신호 없음)"
+            sess.crisis_hold = (level, left - 1)
+        else:
+            sess.crisis_hold = None
+    return signal, signal_level, action_card
+
+
 async def handle_turn(sess, providers, settings) -> None:
     last = sess.messages[-1] if sess.messages else None
     user_text = _normalize_utterance(last.text) if last and last.role == "user" else ""
@@ -431,6 +482,7 @@ async def handle_turn(sess, providers, settings) -> None:
     card_ctx = None
     accepted = _accepts_offer(user_text)
     if accepted:
+        named = _offered_service(sess)
         queries = []
         oq = _offer_query(sess)
         if oq:
@@ -439,10 +491,15 @@ async def handle_turn(sess, providers, settings) -> None:
             for cand in (_offer_candidate(sess), (sess.last_rag or {}).get("서비스명")):
                 if cand and cand not in queries:
                     queries.append(cand)  # 패널 후보 → 직전 카드 서비스(상세 요청 해석)
+        known_names = {n for n in (named, _offer_candidate(sess), (sess.last_rag or {}).get("서비스명")) if n}
         for q in queries:
             card_ctx = await _rag_lookup(sess, providers, settings, q)
             if card_ctx:
                 bc = False
+                if q in known_names:
+                    # 질의가 결정적 서비스명이면 카드 타깃 고정 — 수락 턴에서 보미가
+                    # 이름 재언급 없이 절차만 말해도 카드가 무산되지 않게 (H1 실측)
+                    card_ctx["target"] = q
                 break
     # 수락형 발화("응 자세히 알려줘")는 일반 검색으로 흘리지 않는다 — 기능어 위주라
     # 어휘 우연으로 게이트를 뚫고 무관 자료가 접지되는 사고 실측(응급안전안심 등).
@@ -451,32 +508,7 @@ async def handle_turn(sess, providers, settings) -> None:
 
     # 동일 턴 위험신호 주입 — 결정적 안전망(scan)은 즉시 계산되므로, 배너(비동기 추출)와
     # 별개로 '이번 답변'의 지침에도 반영한다 (예: 낙상 → 상태 확인 + 진료 권고를 자연스럽게)
-    signal = ""
-    signal_level = ""
-    action_card = None
-    if not bc:
-        hits = safety.scan(user_text)
-        if hits:
-            signal = " / ".join(dict.fromkeys(h["내용"] for h in hits))
-            kinds = {h["_kind"] for h in hits}
-            # 응대 강도 결정 — 응급·위기 턴은 발화 지침 자체가 달라야 한다
-            # (실측: 배너는 emergency인데 발화는 '심각하면 119' 조건부로 새는 이중 온도)
-            if "medical_emergency" in kinds:
-                signal_level = "emergency"
-            elif "suicide_acute" in kinds or "suicide_warning" in kinds:
-                signal_level = "suicide"
-            elif "fraud_exposure" in kinds:
-                signal_level = "fraud"
-        # 이미 송금한 사기 피해: 위기번호·순서는 LLM 변주에 맡기지 않고 코드가 카드로 보장(T2 원칙)
-        if any(h["_kind"] == "fraud_exposure" for h in hits) and _FRAUD_SENT.search(user_text):
-            action_card = (
-                "🚨 지금 바로 하실 일\n"
-                "① 경찰 112에 신고하세요.\n"
-                "② 돈을 보낸 은행 고객센터에 '지급정지'를 요청하세요.\n"
-                "③ 막막하시면 금융감독원 1332가 도와드려요.\n"
-                "빠를수록 돈을 지킬 가능성이 커져요. 어르신 잘못이 아니에요.",
-                "지금 바로 경찰 일일이에 신고하시고, 은행에 지급정지를 요청하세요. 순서는 화면에 적어 드렸어요.",
-            )
+    signal, signal_level, action_card = _resolve_signal(sess, user_text, bc)
 
     system = prompts.chat_system(
         card_ctx["block"] if card_ctx else "",

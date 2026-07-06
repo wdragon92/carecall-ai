@@ -85,6 +85,14 @@ def test_fraud_deterministic_rule():
     assert all(d["_kind"] != "fraud_exposure" for d in safety.scan("사기 같지는 않았어"))
 
 
+def test_fraud_dialect_variants():
+    """사투리·구어 사칭 표현도 결정망이 잡는다 (G 배치 실측 공백)."""
+    for utter in ["검찰청이라 카믄서 전화가 왔다", "은행이라 카믄서 링크를 누르라고 문자가 왔데이",
+                  "폰이 고장 나가 돈이 급하다 카데"]:
+        kinds = {d["_kind"] for d in safety.scan(utter)}
+        assert "fraud_exposure" in kinds, utter
+
+
 def test_phrase_variants_from_matrix_audit():
     """테스트 카탈로그 감사에서 발견된 어순·활용 변형 공백 보강."""
     kinds = {d["_kind"] for d in safety.scan("변이 새까만 게 짜장 같아")}
