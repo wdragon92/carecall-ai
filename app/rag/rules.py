@@ -101,8 +101,10 @@ def slots_from_text(text: str) -> dict:
     out: dict = {"age": None, "household": None, "income": None}
 
     age_pos = -1
-    for m in re.finditer(r"(?:만\s*)?(\d{2})\s*(?:살|세)", t):
-        out["age"], age_pos = int(m.group(1)), m.start()
+    for m in re.finditer(r"(?:만\s*)?(\d{2,3})\s*(?:살|세)", t):
+        age = int(m.group(1))
+        if 40 <= age <= 119:  # "만 100세" 오파싱(00세→0)·전화번호 오탐 방지
+            out["age"], age_pos = age, m.start()
     for tens, tv in _TENS.items():
         for m in re.finditer(tens, t):
             if m.start() <= age_pos:

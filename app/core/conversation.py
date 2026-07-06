@@ -7,7 +7,7 @@ import logging
 import re
 from datetime import datetime
 
-from app.core import prompts, welfare
+from app.core import prompts, safety, welfare
 from app.rag import rules
 from app.rag.answer import compose_card, pick_card, rag_prompt_block, refresh_detail
 from app.rag.apply import build_apply_package, package_to_text
@@ -41,6 +41,7 @@ def _is_backchannel(text: str) -> bool:
 
 
 _DECLINE = re.compile(r"아니|괜찮|됐어|나중|말고|싫")
+_INFO_REQ = re.compile(r"알려|궁금|자세히|말해|들어보")
 
 
 def _accepts_offer(text: str) -> bool:
@@ -49,7 +50,7 @@ def _accepts_offer(text: str) -> bool:
     norm = re.sub(r"[.!?~,…\s]+", "", t)
     if not norm or len(norm) > 10 or _DECLINE.search(t):
         return False
-    return norm in _ASSENT or bool(re.search(r"알려|궁금|자세히|말해|들어보", t))
+    return norm in _ASSENT or bool(_INFO_REQ.search(t))
 
 
 # 목록 항목(번호/글머리/굵은 용어+콜론)으로 시작하는 단락 — 앞 말풍선에 이어 붙일 대상
@@ -262,7 +263,8 @@ async def _rag_lookup(sess, providers, settings, user_text: str) -> dict | None:
         return None
     emode = providers.modes.get("embed", "mock")
     r = hybrid_retrieve(rt, qvec, q, k=settings.rag_top_k, pool=settings.rag_pool,
-                        min_vec=settings.rag_item_threshold(emode))
+                        min_vec=settings.rag_item_threshold(emode),
+                        region=settings.rag_default_region)
     ok = passes_gate(r, settings, emode)
     log.info("rag lookup top=%.3f bm25=%.1f gate=%s q=%s", r.top_score, r.bm25_top, ok, q[:40])
     if not ok:
@@ -284,8 +286,16 @@ def _basic_pension_fields(providers) -> tuple[dict, str, str]:
     return {"서비스명": "기초연금", "신청방법": "주민센터, 복지로(온라인), 국민연금공단"}, "", ""
 
 
+# LLM 슬롯 환각 방어 — 발화에 해당 근거 토큰이 있어야만 LLM 값을 인정
+# ("기초연금 나도 받을 수 있나?"만 듣고 HCX가 나이를 지어내는 사례 실측)
+_EV_AGE = re.compile(r"\d{2,3}\s*(?:살|세)|쉰|예순|일흔|여든|아흔")
+_EV_HH = re.compile(r"혼자|독거|홀로|같이 살|배우자|영감|할멈|부부|둘이")
+_EV_INC = re.compile(r"\d+\s*(?:만\s*)?원|\d+\s*만|소득|월급|수입|연금(?:을|이)?\s*\d")
+
+
 async def _extract_slots(sess, providers) -> dict:
-    """슬롯 추출: LLM(실) → 실패·형식이상 시 정규식 폴백. 대상은 사용자 발화만."""
+    """슬롯 추출: LLM(실) → 실패·형식이상 시 정규식 폴백. 대상은 사용자 발화만.
+    LLM 값은 발화에 근거 토큰이 있을 때만 채택(환각 차단) — 판정의 결정론 유지."""
     recent = "\n".join(m.text for m in sess.messages if m.role == "user")[-500:]
     try:
         data = await providers.llm.extract_json(
@@ -293,7 +303,11 @@ async def _extract_slots(sess, providers) -> dict:
             rules.SLOT_SCHEMA,
         )
         if isinstance(data, dict) and any(k in data for k in ("age", "household", "income")):
-            got = {k: data.get(k) for k in ("age", "household", "income")}
+            got = {
+                "age": data.get("age") if _EV_AGE.search(recent) else None,
+                "household": data.get("household") if _EV_HH.search(recent) else None,
+                "income": data.get("income") if _EV_INC.search(recent) else None,
+            }
             if any(v is not None for v in got.values()):
                 return got
     except Exception as exc:  # noqa: BLE001
@@ -365,21 +379,40 @@ async def handle_turn(sess, providers, settings) -> None:
 
     # 제안 수락 흐름: 직전 턴에 보미가 복지를 제안("알려드릴까요?")했고 어르신이 긍정 호응
     # → 그 서비스명으로 근거(RAG) 검색해 카드까지 이어지는 안내 턴으로 승격.
+    # 질의 체인: 제안 서비스명/제안 원문 → (명시적 정보 요청이면) 패널 매칭 후보.
+    # 제안 원문이 게이트에 못 미쳐도 어르신 발화에서 매칭된 후보로 한 번 더 시도한다.
     card_ctx = None
     if _accepts_offer(user_text):
-        offered = _offer_query(sess)
-        if offered:
-            card_ctx = await _rag_lookup(sess, providers, settings, offered)
+        queries = []
+        oq = _offer_query(sess)
+        if oq:
+            queries.append(oq)
+        if _INFO_REQ.search(user_text) or oq:
+            cand = _offer_candidate(sess)
+            if cand and cand not in queries:
+                queries.append(cand)
+        for q in queries:
+            card_ctx = await _rag_lookup(sess, providers, settings, q)
             if card_ctx:
                 bc = False
+                break
     if card_ctx is None and not bc:
         card_ctx = await _rag_lookup(sess, providers, settings, user_text)
+
+    # 동일 턴 위험신호 주입 — 결정적 안전망(scan)은 즉시 계산되므로, 배너(비동기 추출)와
+    # 별개로 '이번 답변'의 지침에도 반영한다 (예: 낙상 → 상태 확인 + 진료 권고를 자연스럽게)
+    signal = ""
+    if not bc:
+        hits = safety.scan(user_text)
+        if hits:
+            signal = " / ".join(dict.fromkeys(h["내용"] for h in hits))
 
     system = prompts.chat_system(
         card_ctx["block"] if card_ctx else "",
         memo=_situation_memo(sess),  # HCX-007 추출 결과를 대화 컨텍스트로 환류
         backchannel=bc,
         rag=bool(card_ctx),
+        signal=signal,
     )
     messages = [{"role": "system", "content": system}] + sess.history_for_llm()
     # 복지 안내처럼 긴 정보가 목록 중간에 잘리지 않도록 여유 있게. 평소 답의 길이는 프롬프트가 통제.

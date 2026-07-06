@@ -113,13 +113,39 @@ class Retrieval:
     bm25_top: float = 0.0   # BM25 최고점 (어휘 증거 신호)
 
 
+# 광역 지자체 약칭 — 질의의 "경북" 발화가 "경상북도" 카드를 허용하게
+_REGION_ALIASES = {"경상북도": ("경북",), "대구광역시": ("대구",), "경상남도": ("경남",),
+                   "전라북도": ("전북",), "전라남도": ("전남",), "충청북도": ("충북",), "충청남도": ("충남",)}
+
+
+def region_ok(chunk: DocChunk, region: str, qtext: str) -> bool:
+    """지자체 카드 지역 게이트 — 중앙부처(지역 없음)는 통과, 지자체는 기본 지역(대구) 또는
+    질의에 그 지역명이 직접 등장할 때만. ('밥을 못 먹어' → 문경시 사업 매칭 방지)"""
+    area = (chunk.fields or {}).get("지역", "")
+    if not area:
+        return True
+    if region and region in area:
+        return True
+    for tok in area.split():
+        if tok in qtext:
+            return True
+        base = tok.rstrip("시군구도")
+        if base and base in qtext:
+            return True
+        for alias in _REGION_ALIASES.get(tok, ()):
+            if alias in qtext:
+                return True
+    return False
+
+
 def hybrid_retrieve(
     rt: RagRuntime, qvec, qtext: str, k: int = 4, pool: int = 20, rrf_k: int = 60,
-    min_vec: float = 0.0,
+    min_vec: float = 0.0, region: str = "",
 ) -> Retrieval:
     """벡터+BM25 RRF 융합 상위 k + 게이트 신호(벡터 top1, BM25 top).
     min_vec: 항목별 벡터 유사도 하한 — 'top4 고집' 대신 기준 미달 항목은 결과에서 제외
-    (컨텍스트·카드·패널에 관련 낮은 자료가 끼는 것 방지)."""
+    (컨텍스트·카드·패널에 관련 낮은 자료가 끼는 것 방지).
+    region: 지자체 카드 기본 지역 게이트 (region_ok)."""
     n = len(rt.chunks)
     if n == 0 or qvec is None:
         return Retrieval()
@@ -142,7 +168,10 @@ def hybrid_retrieve(
             fused[int(i)] = fused.get(int(i), 0.0) + 1.0 / (rrf_k + r + 1)
 
     order = sorted(fused.items(), key=lambda x: -x[1])[:k]
-    items = [(rt.chunks[i], s) for i, s in order if vec_of.get(i, 0.0) >= min_vec]
+    items = [
+        (rt.chunks[i], s) for i, s in order
+        if vec_of.get(i, 0.0) >= min_vec and region_ok(rt.chunks[i], region, qtext)
+    ]
     return Retrieval(items, top_score, bm25_top)
 
 

@@ -1,6 +1,7 @@
 """WebSocket 엔드포인트 (routes §6.2): 연결→선인사→사용자 턴 루프."""
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -29,6 +30,9 @@ async def ws_endpoint(websocket: WebSocket, session_id: str) -> None:
     sess.ws = websocket
     await sess.send({"type": "session_ready", "session_id": session_id, "providers": providers.modes})
     if not sess.messages:  # 재연결 시 인사 중복 방지
+        # 접속하자마자 말을 걸면 브라우저 오디오 정책(제스처 전 자동재생 차단)에 첫 인사
+        # 음성이 먹히기 쉽다 — 화면이 자리 잡고 첫 터치가 들어올 시간을 준다.
+        await asyncio.sleep(max(0.0, settings.greet_delay_seconds))
         await conversation.greet(sess)
 
     try:

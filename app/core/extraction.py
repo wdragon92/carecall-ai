@@ -100,7 +100,8 @@ async def _run_once(sess, providers) -> None:
     await sess.send({"type": "findings_update", "findings": [_dump(f) for f in findings]})
 
     # 경보 재평가 — LLM이 새 위험을 잡았으면 상향(하향은 안 함).
-    # 연계 분리: 건강 위급 → 119 문구 / 심리(긴급·정서) 위급 → 109 문구 (109는 심리 전용)
+    # 연계 분리: 건강 위급 → 119 / 심리(긴급·정서) 위급 → 109 / 사기 → 112·1332
+    # (사기를 psych로 묶으면 보이스피싱 정황에 자살예방 109 배너가 뜨는 오연계가 된다)
     llm_flags: set[str] = set()
     for f in llm_findings:
         serious = f.category == "긴급" or (f.severity == "높음" and f.needs_human)
@@ -108,6 +109,8 @@ async def _run_once(sess, providers) -> None:
             continue
         if f.category == "건강":
             llm_flags.add("medical")
+        elif f.category == "사기_노출":
+            llm_flags.add("fraud")
         else:
             llm_flags.add("psych")
     level2, message2 = safety.alert(kinds, llm_flags)

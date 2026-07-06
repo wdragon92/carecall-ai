@@ -7,6 +7,7 @@ os.environ["NCP_APIGW_CLIENT_ID"] = ""
 os.environ["NCP_APIGW_CLIENT_SECRET"] = ""
 os.environ["CLOVA_OCR_INVOKE_URL"] = ""
 os.environ["CLOVA_OCR_SECRET"] = ""
+os.environ["GREET_DELAY_SECONDS"] = "0"  # 인사 지연은 브라우저 오디오 정책용 — 테스트는 즉시
 
 import pytest
 

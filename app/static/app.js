@@ -134,23 +134,36 @@ function appendAiBubble(text, kind, card) {
   scrollDown();
 }
 
-/* 텍스트 카드 안의 복지로 URL만 클릭 링크로 (DOM 노드 조립 — 주입 안전).
+/* 텍스트 카드(신청 패키지 등): 복지로 URL을 본문에서 걷어내고, 구조화 RAG 카드와
+   똑같이 카드 '하단 버튼' 한 개로 붙인다 (링크 위치·모양 일관화 — 전 카드 공통).
    OCR 문서에서 읽힌 일반 URL(스미싱 링크 등)은 절대 링크화하지 않는다. */
 function appendWithBokjiroLinks(el, text) {
   const re = /https?:\/\/(?:www\.)?bokjiro\.go\.kr[^\s]*/g;
-  let last = 0, m;
-  while ((m = re.exec(text)) !== null) {
-    el.appendChild(document.createTextNode(text.slice(last, m.index)));
+  const urls = text.match(re) || [];
+  let shown = text;
+  for (const u of urls) {
+    shown = shown
+      .split("\n")
+      .map((line) => {
+        if (!line.includes(u)) return line;
+        const rest = line.replace(u, "").trim();
+        // "· 온라인:" / "· 복지로:"처럼 라벨만 남으면 줄 자체를 지운다
+        return /^[·\-•\s]*(온라인|복지로)?\s*:?\s*$/.test(rest) ? null : rest;
+      })
+      .filter((l) => l !== null)
+      .join("\n");
+  }
+  el.appendChild(document.createTextNode(shown));
+  if (urls.length) {
     const a = document.createElement("a");
     a.className = "rag-link";
-    a.href = m[0];
+    a.href = urls[0];
     a.target = "_blank";
     a.rel = "noopener";
     a.textContent = "복지로에서 자세히 보기 →";
+    el.appendChild(document.createElement("br"));
     el.appendChild(a);
-    last = m.index + m[0].length;
   }
-  el.appendChild(document.createTextNode(text.slice(last)));
 }
 
 /* RAG 정보 카드 DOM — 전부 textContent 기반 (주입 안전) */
@@ -303,7 +316,7 @@ function renderWelfare(items) {
     const el = document.createElement("div");
     el.className = "card newcard";
     const link = it.url && /^https?:\/\//.test(it.url)
-      ? `<a class="rag-link" style="font-size:0.85rem" href="${escapeHtml(it.url)}" target="_blank" rel="noopener">복지로에서 자세히 보기 →</a>`
+      ? `<a class="rag-link" href="${escapeHtml(it.url)}" target="_blank" rel="noopener">복지로에서 자세히 보기 →</a>`
       : "";
     el.innerHTML = `<div class="font-semibold text-blue-700">🤝 ${escapeHtml(it["이름"])}</div>
       <div class="mt-1 text-sm text-gray-700">${escapeHtml(it["한줄"] || "")}</div>

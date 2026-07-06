@@ -30,11 +30,16 @@ class Settings(BaseSettings):
     ncp_secret_key: str = ""
     ncp_region: str = "KR"
 
+    # 접속 후 첫 인사까지 지연(초) — 브라우저 자동재생 정책·화면 안착 대기 (테스트는 0)
+    greet_delay_seconds: float = 3.0
+
     # RAG — 복지 검색 (docs/돌봄콜_RAG_파이프라인_계획_v2.md)
     rag_enabled: bool = True
     rag_data_dir: str = "data"
     rag_top_k: int = 4
     rag_pool: int = 20
+    # 지역 개인화: 지자체 카드는 기본 대구 기준 — 질의에 다른 지역명이 있으면 그 지역 허용
+    rag_default_region: str = "대구"
     # 거부 게이트(2단): top ≥ high(고신뢰) OR (top ≥ low AND bm25 ≥ evidence)
     # 실측(557청크 코퍼스): in top 0.478~0.670·bm25 12.5~24.6 / out top ~0.521·bm25 로또14.3
     # → BM25 절대값은 코퍼스 크기에 따라 커지므로 재빌드 규모 변경 시 eval_rag로 재튜닝할 것

@@ -13,7 +13,9 @@ def test_senior_keeps_elderly_and_universal():
     assert senior_relevant("기초연금", "만 65세 이상 소득 하위 70%")
     assert senior_relevant("노인맞춤돌봄서비스", "")
     assert senior_relevant("긴급복지 생계지원", "갑작스러운 위기로 생계가 곤란한 가구")  # 전연령 유지
-    assert senior_relevant("조손가족 지원", "조손가족의 아동 양육 지원")  # 조부모 양육 = 어르신 시나리오
+    # 가족상담 도메인은 '조손' 한 단어로 통과 금지 (온가족보듬사업 실사례)
+    assert not senior_relevant("온가족보듬사업", "한부모‧조손가족, 1인가구, 다문화가족 등 위기가족")
+    assert not senior_relevant("조손가족 지원", "조손가족의 아동 양육 지원")  # 가족 도메인으로 분류
 
 
 def test_senior_drops_youth_and_worker():
@@ -36,6 +38,52 @@ def test_senior_age_cap_in_target():
 
 def test_chunk_filter_defaults_keep():
     assert chunk_senior_relevant(DocChunk(text="x", source="s", fields=None))
+
+
+def test_senior_drops_other_target_domains():
+    """실사례: '밥을 잘 못 먹어' → 문경시 재가장애인 밑반찬지원 매칭 사고.
+    장애인·임산부·다문화 등 전용 대상 도메인은 노인 표지 없으면 배제."""
+    assert not senior_relevant("재가장애인 밑반찬지원사업", "재가장애인을 지원합니다")
+    assert not senior_relevant("임산부 영양제 지원", "")
+    assert not senior_relevant("다문화가족 정착 지원", "결혼이민자")
+    # 노인·장애인 겸용은 유지(노인 표지 우선)
+    assert senior_relevant("독거노인·장애인 응급안전안심서비스", "")
+    # 전연령 저소득은 유지
+    assert senior_relevant("저소득층 밑반찬 지원사업", "저소득 가구")
+
+
+def test_senior_tag_category_exclusion():
+    """XML 대상특성 태그(관련어)에 전용 카테고리만 있으면 배제 — 단 검색 키워드의
+    일반어('보증금')는 태그 배제에 걸리면 안 됨(주거급여 오배제 실사례)."""
+    disabled = DocChunk(
+        text="서비스명: 이동지원 바우처\n지원대상: 등록자\n관련어: 장애인",
+        source="s", fields={"서비스명": "이동지원 바우처", "지원대상": "등록자"},
+    )
+    assert not chunk_senior_relevant(disabled)
+    housing = DocChunk(
+        text="서비스명: 주거급여\n지원대상: 중위소득 48% 이하 가구\n관련어: 월세 집세 전세 주거 수리 보증금",
+        source="s", fields={"서비스명": "주거급여", "지원대상": "중위소득 48% 이하 가구"},
+    )
+    assert chunk_senior_relevant(housing)
+    tagged_senior = DocChunk(
+        text="서비스명: 무릎수술 지원\n지원대상: 등록자\n관련어: 노년 장애인",
+        source="s", fields={"서비스명": "무릎수술 지원", "지원대상": "등록자"},
+    )
+    assert chunk_senior_relevant(tagged_senior)  # 노년 공존 태그는 유지
+
+
+def test_region_gate_default_daegu():
+    from app.rag.search import region_ok
+
+    mun_gyeong = DocChunk(text="", source="s", fields={"지역": "경상북도 문경시"})
+    daegu = DocChunk(text="", source="s", fields={"지역": "대구광역시 달서구"})
+    national = DocChunk(text="", source="s", fields={})
+    q = "요즘 밥을 잘 못 먹어"
+    assert not region_ok(mun_gyeong, "대구", q)  # 타 지역 지자체 — 기본 차단
+    assert region_ok(daegu, "대구", q)
+    assert region_ok(national, "대구", q)  # 중앙부처(전국)
+    assert region_ok(mun_gyeong, "대구", "문경 사는 동생 얘긴데")  # 지역 직접 언급 시 허용
+    assert region_ok(mun_gyeong, "대구", "경북에도 이런 게 있나")  # 광역 약칭
 
 
 # ---- 링크 폴백 체인 ----

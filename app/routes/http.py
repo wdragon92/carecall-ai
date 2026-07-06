@@ -32,12 +32,21 @@ def _fmt_from(filename: str | None, content_type: str | None) -> str:
     return "jpg"
 
 
+# 위기·상담 전화번호는 자릿수 낭독이 정답 ("백십구"가 아니라 "일일구") — 표시는 원문, 낭독만 치환
+_HOTLINE_READS = [
+    ("1577-1389", "일오칠칠에 일삼팔구"), ("1577-0199", "일오칠칠에 공일구구"),
+    ("1332", "일삼삼이"), ("109", "일공구"), ("119", "일일구"), ("112", "일일이"), ("129", "일이구"),
+]
+
+
 def _clean_for_tts(text: str) -> str:
     t = _EMOJI.sub("", text)
     t = re.sub(r"[*_`#>~\[\]()]", " ", t)
     t = re.sub(r"\s+", " ", t).strip()
     # 낭독 페이싱: "잘 안 ~"를 붙여 읽어 어색 → 쉼표로 ~0.2초 숨 (화면 표시는 원문 그대로)
     t = t.replace("잘 안 ", "잘, 안 ")
+    for num, read in _HOTLINE_READS:  # 긴 번호부터 치환(부분 겹침 방지 순서)
+        t = re.sub(rf"(?<![\d-]){re.escape(num)}(?![\d-])", read, t)
     return t[:1900]
 
 
@@ -85,7 +94,7 @@ async def rag_answer_once(request: Request) -> dict:
 
     emode = providers.modes.get("embed", "mock")
     gate = {"low": s.rag_threshold(emode), "high": s.rag_threshold_high(emode),
-            "bm25_evidence": s.rag_bm25_evidence}
+            "bm25_evidence": s.rag_bm25_min(emode)}
     if not ok:
         return {"answer": REJECT_ANSWER, "rejected": True, "top_score": round(r.top_score, 3),
                 "bm25_top": round(r.bm25_top, 2), "gate": gate,
@@ -119,11 +128,19 @@ async def rag_screen(request: Request) -> dict:
     from app.rag.apply import build_apply_package
     from app.rag.rules import BASIC_PENSION_2026, check_basic_pension
 
+    def _int_or_none(v):
+        try:
+            return int(v) if v is not None else None
+        except (TypeError, ValueError):
+            return None
+
     body = await request.json()
     slots = (body or {}).get("slots") or {}
-    verdict, ment = check_basic_pension(slots.get("age"), slots.get("household"), slots.get("income"))
+    age_in = _int_or_none(slots.get("age"))  # "칠십" 같은 비정수 입력에 500 나지 않게
+    household = slots.get("household") if slots.get("household") in ("single", "couple") else None
+    verdict, ment = check_basic_pension(age_in, household, _int_or_none(slots.get("income")))
     pkg = None
-    age = slots.get("age") or 0
+    age = age_in or 0
     if verdict in ("가능성높음", "확인필요") and age >= BASIC_PENSION_2026["age_min"]:
         providers = request.app.state.providers
         chunk = next(

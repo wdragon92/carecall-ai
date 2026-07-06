@@ -36,6 +36,9 @@ RULES: tuple[Rule, ...] = (
     Rule("medical_emergency", "건강", "높음", True, "응급 의심 신호(의식/출혈) — 즉시 119 권고",
          ("쓰러졌", "정신을 잃", "의식을 잃", "깨워도 안", "피를 토", "새까만 변",
           "짜장 같은", "피가 안 멈", "벼락 맞은", "터질 듯한 두통")),
+    # 구조 요청 — 유사 서비스 실사례: '살려줘' 한마디가 잡담 처리되면 치명적 (안전 우선, 오탐 감수)
+    Rule("medical_emergency", "건강", "높음", True, "구조 요청 표현 — 상태 확인 및 즉시 119 권고",
+         ("살려줘", "살려 줘", "살려주", "사람 살려", "구해줘", "구해 줘", "구해주")),
     # ── 의료 주의 (T2 → 빠른 진료). 비전형 증상 포함 ──
     Rule("medical_soon", "건강", "높음", False, "가슴 불편 반복 — 심장 확인 위해 빠른 진료 권고",
          ("가슴이 답답", "가슴이 뻐근", "가슴이 뭉근", "가슴이 조이", "계단 오르면 가슴", "가슴이 아파",
@@ -113,8 +116,8 @@ def scan(text: str) -> list[dict]:
 
 
 def alert(kinds: set[str], llm_flags: set[str] | frozenset[str] = frozenset()) -> tuple[str | None, str | None]:
-    """탐지된 kind + LLM 심각신호(flags ⊆ {"medical","psych"})로 경보 레벨·문구 결정.
-    연계 원칙: 자살예방상담 109는 심리 신호에만, 건강 응급은 119·보호자 연계로 분리.
+    """탐지된 kind + LLM 심각신호(flags ⊆ {"medical","psych","fraud"})로 경보 레벨·문구 결정.
+    연계 원칙: 자살예방상담 109는 심리 신호에만, 건강 응급은 119·보호자, 사기는 112·1332로 분리.
     수동적(완곡) 자살신호는 warning 고정(직접 표현만 emergency).
     mood_low(우울·무기력)는 배너 없이 카드로만."""
     # 결정적(코드) 탐지를 LLM 플래그보다 먼저 — LLM이 의료 응급을 '긴급(심리)'로 잘못 라벨해도
@@ -129,6 +132,8 @@ def alert(kinds: set[str], llm_flags: set[str] | frozenset[str] = frozenset()) -
         return "emergency", "응급이 의심되는 몸 신호가 있어요. 지금 바로 119에 연락하시고, 보호자께도 알려주세요."
     if "suicide_warning" in kinds:
         return "warning", "마음이 많이 지치신 것 같아 걱정돼요. 혼자 힘들어하지 마시고, 24시간 자살예방상담 109나 가까운 분과 이야기 나눠보시길 권해요."
+    if "fraud" in llm_flags:
+        return "warning", "사기가 의심되는 정황이 있어요. 돈·개인정보는 절대 보내지 마시고, 이미 보내셨다면 지금 바로 경찰 112와 은행 지급정지, 금융감독원 1332에 연락하세요."
     if "medical_soon" in kinds:
         return "warning", "몸에 신경 쓰이는 신호가 있어요. 그냥 두지 마시고 가까운 시일 안에 진료를 받아보시고, 보호자께도 알려드리세요."
     return None, None

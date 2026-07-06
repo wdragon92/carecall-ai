@@ -57,6 +57,43 @@ def test_slots_correction_last_mention_wins():
     assert s["household"] == "couple"
 
 
+def test_slots_age_range_guard():
+    assert slots_from_text("우리 어머니가 만 100세야")["age"] == 100  # 세 자리 정상 파싱
+    assert slots_from_text("스무살 손주가 있어")["age"] is None  # 숫자 2자리라도 40 미만 무시
+    assert slots_from_text("30세 아들이 있어")["age"] is None
+
+
+def test_llm_slot_hallucination_gated(monkeypatch):
+    """발화에 나이 근거가 없으면 LLM이 지어낸 나이를 버린다 (실측: '기초연금 나도 받을 수 있나?'에 65 환각)."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from app.core.conversation import _extract_slots
+
+    class FakeLLM:
+        async def extract_json(self, messages, schema):
+            return {"age": 65, "household": "single", "income": None}  # 전부 환각
+
+    sess = SimpleNamespace(messages=[SimpleNamespace(role="user", text="기초연금 나도 받을 수 있나?")])
+    got = asyncio.run(_extract_slots(sess, SimpleNamespace(llm=FakeLLM())))
+    assert got["age"] is None and got["household"] is None
+
+    # 근거가 있으면 LLM 값 채택
+    sess2 = SimpleNamespace(messages=[SimpleNamespace(role="user", text="일흔둘이고 혼자 살아")])
+    class FakeLLM2:
+        async def extract_json(self, messages, schema):
+            return {"age": 72, "household": "single", "income": None}
+    got2 = asyncio.run(_extract_slots(sess2, SimpleNamespace(llm=FakeLLM2())))
+    assert got2["age"] == 72 and got2["household"] == "single"
+
+
+def test_rest_screen_bad_types_no_500(rag_client):
+    r = rag_client.post("/api/rag/screen", json={"slots": {"age": "칠십"}})
+    assert r.status_code == 200 and r.json()["판정"] == "확인필요"  # 되묻기로 우아하게
+    r = rag_client.post("/api/rag/screen", json={"slots": {"age": 72, "household": "alone"}})
+    assert r.status_code == 200  # 이상 가구값도 500 없이
+
+
 def test_rest_screen_endpoint(rag_client):
     r = rag_client.post("/api/rag/screen", json={"slots": {"age": 60}}).json()
     assert r["판정"] == "해당없음" and r["apply_package"] is None
