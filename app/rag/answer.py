@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 from app.rag.schema import DocChunk
 from app.rag.search import RagRuntime, Retrieval, hybrid_retrieve, passes_gate
@@ -66,18 +67,19 @@ def compose_card(chunk: DocChunk, fields: dict, live: bool) -> tuple[str, str]:
 
 
 def pick_card(retrieved: list[tuple[DocChunk, float]], llm_text: str) -> DocChunk | None:
-    """카드로 보여줄 1건: AI가 실제 언급한 서비스 우선, 없으면 검색 1위.
-    fields 없는 청크(PDF)는 카드 불가."""
+    """카드로 보여줄 1건: AI가 실제 언급한 서비스 우선(카드=답변 일관성), 없으면 검색 1위.
+    LLM이 '노인 맞춤 돌봄 서비스'처럼 띄어 써도 잡히게 공백 무시 비교. PDF 청크(fields 없음)는 카드 불가."""
     withf = [(c, s) for c, s in retrieved if c.fields]
     if not withf:
         return None
+    text_n = re.sub(r"\s+", "", llm_text or "")
     for c, _ in withf:
-        name = c.fields.get("서비스명", "")
-        if name and name in llm_text:
+        name_n = re.sub(r"\s+", "", c.fields.get("서비스명", ""))
+        if name_n and name_n in text_n:
             return c
     for c, _ in withf:
-        base = c.fields.get("서비스명", "").split("(")[0].strip()
-        if base and base in llm_text:
+        base_n = re.sub(r"\s+", "", c.fields.get("서비스명", "").split("(")[0])
+        if base_n and base_n in text_n:
             return c
     return withf[0][0]
 

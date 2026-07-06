@@ -87,6 +87,20 @@ def test_embed_mode_guard(tmp_path):
     assert rt is not None and len(rt.chunks) == 12
 
 
+def test_pick_card_spacing_variants():
+    """LLM이 서비스명을 띄어 써도 카드-답변 일관성 유지."""
+    from app.rag.answer import pick_card
+    from app.rag.schema import DocChunk
+
+    care = DocChunk(text="", source="", fields={"서비스명": "노인맞춤돌봄서비스"})
+    med = DocChunk(text="", source="", fields={"서비스명": "의료급여"})
+    retrieved = [(med, 0.9), (care, 0.8)]  # RRF 1위는 의료급여
+
+    picked = pick_card(retrieved, "어르신께는 노인 맞춤 돌봄 서비스가 도움이 될 것 같아요.")
+    assert picked is care  # 띄어쓰기 변형도 매칭
+    assert pick_card(retrieved, "서비스명 언급 없는 답변") is med  # 폴백은 검색 1위
+
+
 def test_augment_query():
     assert augment_query("그거 어떻게 신청해요?", "기초연금").startswith("기초연금 ")
     assert augment_query("월세 지원이 궁금해요", "기초연금") == "월세 지원이 궁금해요"

@@ -70,8 +70,10 @@ async def _speak(
     card_ctx가 있으면 T2 정보 카드(kind:card)를 같은 턴 마지막 말풍선으로 붙인다."""
     await _typing(sess, True)
     full = ""
+    # 접지(RAG) 턴은 온도를 낮춰 자료 기반 답의 일관성을 높인다 (카드-답변 서비스 일치율↑)
+    temperature = 0.45 if card_ctx else 0.6
     try:
-        full = await providers.llm.chat(messages, max_tokens=max_tokens, temperature=0.6, top_p=0.8)
+        full = await providers.llm.chat(messages, max_tokens=max_tokens, temperature=temperature, top_p=0.8)
         if not full.strip():
             raise ProviderError("empty response")
     except Exception as exc:  # noqa: BLE001 — 어떤 실패든 mock으로 폴백(턴 크래시 방지)
