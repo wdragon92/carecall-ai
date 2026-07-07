@@ -35,10 +35,10 @@ def test_reload_swaps_runtime_and_search_stays_hot(rag_client):
     assert d["card"] and d["card"].startswith("📌")
     assert d["sources"]
 
-    # WS 턴에서도 접지 정상 (rag_status found + 카드 버블)
+    # WS 턴에서도 접지 정상 (searching→found 해소 + 카드 버블)
     sid = rag_client.post("/api/sessions").json()["session_id"]
     with rag_client.websocket_connect(f"/ws/{sid}") as ws:
         handshake(ws)
         bubbles, seen = user_turn(ws, GROUNDING_Q)
-        assert rag_statuses(seen) and rag_statuses(seen)[0]["status"] == "found"
+        assert [s["status"] for s in rag_statuses(seen)] == ["searching", "found"]
         assert bubbles[-1].get("kind") == "card"

@@ -92,7 +92,7 @@ def test_welfare_block_grounded_vs_ungrounded_contacts_always(rag_client):
         assert "[복지 자료" in s1
         assert "반드시 아래 내용에만 근거해 안내" in s1
         assert "서비스명:" in s1  # 검색 청크 원문
-        src = rag_statuses(seen)[0]["sources"][0]
+        src = rag_statuses(seen)[-1]["sources"][0]  # found(마지막 칩)의 근거 메타
         assert src in s1  # rag_status로 알린 출처가 실제 프롬프트 블록의 출처와 일치
 
         # 비접지 턴: '검색된 자료 없음' 명시 (수치 생성 차단 지침)

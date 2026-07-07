@@ -171,7 +171,7 @@ async def test_rag_lookup_embed_failure_falls_back_quietly():
 
     out = await conversation._rag_lookup(sess, providers, settings, "치매 약값이 걱정이에요")
     assert out is None
-    # 칩은 근거 발견(found) 시에만 — 실패·미달 턴엔 검색 UI 소음을 내지 않는다
+    # 게이트 미달·장애 턴엔 칩 자체가 없다 (searching도 게이트 통과 후에만)
     assert all(m.get("type") != "rag_status" for m in sess.sent)
 
 

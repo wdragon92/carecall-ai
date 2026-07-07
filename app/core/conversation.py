@@ -149,11 +149,28 @@ async def _speak(
                     if crisis == "emergency"
                     else "혼자 견디지 않으셔도 돼요. 자살예방상담 109번이 밤낮없이 이야기를 들어줘요.")
             full = f"{full}\n\n{tail}"
+    # 카드 부착 여부를 먼저 판정 — 아래 금액 치환 문구가 실제 카드 유무와 일치해야 한다
+    # (실측: 카드가 빠진 소문성 턴에서 '화면 카드에 적어드린 금액'이 없는 카드를 가리킴).
+    chunk = None
+    if card_ctx and settings is not None:
+        try:  # 카드 선택 실패가 턴을 깨지 않게
+            chunk = pick_card(card_ctx["retrieved"], full,
+                              strict=providers.modes.get("llm") == "real")
+            if chunk is None and card_ctx.get("target"):
+                # 수락 체인의 결정적 타깃 폴백 (코드가 정한 서비스명 — LLM 발화 무관하게 안전)
+                chunk = next(
+                    (c for c, _ in card_ctx["retrieved"]
+                     if (c.fields or {}).get("서비스명") == card_ctx["target"]),
+                    None,
+                )
+        except Exception as exc:  # noqa: BLE001
+            log.warning("card pick failed (%s) — 답변만 전송", exc)
     if card_ctx is not None:
         # T2 하드 가드: 접지 턴 발화의 금액은 카드로만 — 자료 블록의 수치를 LLM이
         # 발화로 옮기는 누출("월 최대 약 34만 원…") 실측. 결정적으로 걷어낸다.
         full = re.sub(r"(?:약\s*)?\d{1,3}(?:,\d{3})*\s*만\s*원(?:\s*수준|\s*정도)?",
-                      "화면 카드에 적어드린 금액", full)
+                      "화면 카드에 적어드린 금액" if chunk is not None else "말씀하신 금액",
+                      full)
     segs = [full.strip()] if single else _segments(full)
     if not segs:
         segs = ["네, 듣고 있어요."]
@@ -164,48 +181,52 @@ async def _speak(
         msg = sess.add_message("assistant", seg)
         bubbles.append({"id": msg.id, "text": seg})
 
-    if card_ctx and settings is not None:
-        try:  # 카드 실패가 턴을 깨지 않게
-            chunk = pick_card(card_ctx["retrieved"], full,
-                              strict=providers.modes.get("llm") == "real")
-            if chunk is None and card_ctx.get("target"):
-                # 수락 체인의 결정적 타깃 폴백 (코드가 정한 서비스명 — LLM 발화 무관하게 안전)
-                chunk = next(
-                    (c for c, _ in card_ctx["retrieved"]
-                     if (c.fields or {}).get("서비스명") == card_ctx["target"]),
-                    None,
-                )
-            if chunk is not None:
-                fields, live = await refresh_detail(settings, chunk)
-                card_text, tts = compose_card(chunk, fields, live)
-                cmsg = sess.add_message("assistant", card_text, tts_text=tts, kind="card")
-                bubbles.append({
-                    "id": cmsg.id, "text": card_text, "kind": "card",
-                    "card": {  # 프론트 구조화 렌더링용 (RAG 근거 가시화)
-                        "title": fields.get("서비스명", ""),
-                        "지역": fields.get("지역", ""),
-                        "대상": fields.get("지원대상", ""),
-                        "지원": fields.get("지원내용", ""),
-                        "신청": fields.get("신청방법", ""),
-                        "문의": fields.get("문의처", ""),
-                        "기준일": chunk.collected_at,
-                        "live": live,
-                        "url": card_url(chunk),
-                        "source": chunk.source,
-                    },
-                })
-                sess.last_rag = {"서비스명": fields.get("서비스명", ""), "serv_id": chunk.serv_id}
-                sess.welfare_cards[chunk.serv_id] = {
-                    "id": chunk.serv_id,
-                    "이름": fields.get("서비스명", ""),
-                    "한줄": fields.get("지원내용", "") or fields.get("지원대상", ""),
-                    "신청처": fields.get("신청방법", ""),
+    card_attached = False
+    if chunk is not None and settings is not None:
+        try:  # 카드 조립 실패가 턴을 깨지 않게
+            fields, live = await refresh_detail(settings, chunk)
+            card_text, tts = compose_card(chunk, fields, live)
+            cmsg = sess.add_message("assistant", card_text, tts_text=tts, kind="card")
+            bubbles.append({
+                "id": cmsg.id, "text": card_text, "kind": "card",
+                "card": {  # 프론트 구조화 렌더링용 (RAG 근거 가시화)
+                    "title": fields.get("서비스명", ""),
+                    "지역": fields.get("지역", ""),
+                    "대상": fields.get("지원대상", ""),
+                    "지원": fields.get("지원내용", ""),
+                    "신청": fields.get("신청방법", ""),
+                    "문의": fields.get("문의처", ""),
                     "기준일": chunk.collected_at,
+                    "live": live,
                     "url": card_url(chunk),
-                }
-                await welfare.push_welfare(sess)  # 패널도 즉시 갱신 (RAG 카드 우선 병합)
+                    "source": chunk.source,
+                },
+            })
+            card_attached = True
+            sess.last_rag = {"서비스명": fields.get("서비스명", ""), "serv_id": chunk.serv_id}
+            sess.welfare_cards[chunk.serv_id] = {
+                "id": chunk.serv_id,
+                "이름": fields.get("서비스명", ""),
+                "한줄": fields.get("지원내용", "") or fields.get("지원대상", ""),
+                "신청처": fields.get("신청방법", ""),
+                "기준일": chunk.collected_at,
+                "url": card_url(chunk),
+            }
+            await welfare.push_welfare(sess)  # 패널도 즉시 갱신 (RAG 카드 우선 병합)
         except Exception as exc:  # noqa: BLE001
             log.warning("card compose failed (%s) — 답변만 전송", exc)
+
+    if card_ctx is not None:
+        # searching 칩 해소 — 카드가 붙으면 found(근거 메타), 아니면 no_match(칩 숨김).
+        # 부정 답변·서비스명 불일치로 카드를 뺀 턴(적대 방어)에 '찾았어요'가 남는 모순 방지.
+        if card_attached:
+            await sess.send({
+                "type": "rag_status", "status": "found",
+                "hits": len(card_ctx["retrieved"]), "top_score": round(card_ctx["top"], 3),
+                "sources": [c.source for c, _ in card_ctx["retrieved"]],
+            })
+        else:
+            await sess.send({"type": "rag_status", "status": "no_match"})
 
     if action_card is not None:  # 결정적 행동 카드(위기번호 등 — LLM 변주와 무관하게 보장)
         atext, atts = action_card
@@ -339,7 +360,7 @@ async def _rag_lookup(sess, providers, settings, user_text: str) -> dict | None:
     if rt is None or not settings.rag_enabled or not user_text.strip():
         return None
     # 검색은 조용히 돌린다 — '찾는 중' 칩을 매 턴 띄우면 잡담("도레미파솔라시도")에도
-    # 검색 UI가 깜빡여 소음이 된다. 칩은 근거를 실제로 찾았을 때(found)만.
+    # 검색 UI가 깜빡여 소음이 된다. 칩은 게이트를 통과한 턴에만 띄운다(searching).
     try:
         # 후속 질문 보강 힌트: 직전 안내 서비스 → 최근 제안 서비스 →
         # (대용어 '그거/아까' + 정보 요청일 때만) 발화 키워드 매칭 후보
@@ -359,11 +380,11 @@ async def _rag_lookup(sess, providers, settings, user_text: str) -> dict | None:
     log.info("rag lookup top=%.3f bm25=%.1f gate=%s q=%s", r.top_score, r.bm25_top, ok, q[:40])
     if not ok:
         return None
-    await sess.send({
-        "type": "rag_status", "status": "found",
-        "hits": len(r.items), "top_score": round(r.top_score, 3),
-        "sources": [c.source for c, _ in r.items],
-    })
+    # 게이트 통과는 '후보 발견'이지 아직 '근거 확정'이 아니다 — 확정(found/no_match)은 답변
+    # 생성 후 카드 부착 여부가 정한다(_speak). 실측: "매월 100만원씩 주는 지원 있어?"가
+    # 어휘·의미 우연('100세이상 부모 등 부양지원', top 0.628)으로 고신뢰선까지 넘었지만
+    # 답변은 '확인되지 않는다' — 이때 '찾았어요' 칩만 남으면 답변과 모순된다.
+    await sess.send({"type": "rag_status", "status": "searching"})
     return {"retrieved": r.items, "block": rag_prompt_block(r.items), "top": r.top_score}
 
 

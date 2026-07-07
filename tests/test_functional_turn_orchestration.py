@@ -1,11 +1,13 @@
 """[턴 오케스트레이션] 계약 1~3 — WS 메시지 배선·순서·횟수 (화이트박스, 전부 목).
 
-계약 1: 접지 턴은 rag_status(found)·ai_typing on/off 각 1회·ai_turn 정확히 1회.
+계약 1: 접지 턴은 rag_status 2단(searching→found)·ai_typing on/off 각 1회·ai_turn 정확히 1회.
         카드 버블은 bubbles의 마지막 요소.
-        ※ 실제 배선: rag_status는 검색(생성 이전) 시점에 나가므로 ai_typing(on)보다
-          먼저 도착한다 — 여기서는 '둘 다 ai_typing(off)·ai_turn보다 앞'까지만 고정.
-계약 2: rag_status는 이제 'found'만 — 거부 질의·백채널·임베딩 장애 어느 경로에서도
-        rag_status 자체가 전송되지 않는다 (소음 없는 폴백).
+        ※ 실제 배선: searching은 검색(생성 이전) 시점이라 ai_typing(on)보다 먼저,
+          found는 카드 확정(생성 이후) 시점이라 typing(on)과 typing(off) 사이에 도착한다.
+계약 2: 게이트 미달 경로엔 칩 자체가 없다 — 거부 질의·백채널·임베딩 장애 어느 경로에서도
+        rag_status가 전송되지 않는다 (소음 없는 폴백). 게이트를 통과했지만 카드가 안 붙는
+        턴(부정 답변·이름 불일치)은 searching→no_match로 해소된다 — '찾았어요' 칩과
+        '없어요' 답변이 모순되는 실측 사례("매월 100만원씩 주는 지원 있어?") 방지.
 계약 3: 스크리닝(기초연금) 턴은 ai_typing·rag_status 미전송 + LLM chat 미호출
         (슬롯 extract_json만) — 그래도 턴 끝 추출은 스폰되어 findings_update가 온다.
 계약 1-보강: 송금 정황 턴의 결정적 행동 카드(action_card)도 같은 턴 '마지막' 버블 —
@@ -15,6 +17,7 @@ from test_functional_helpers import (
     ALIEN_Q,
     GROUNDING_Q,
     BoomEmbed,
+    NegationChatLLM,
     card_bubbles,
     drain_until,
     handshake,
@@ -46,17 +49,17 @@ def test_grounded_turn_message_order_and_single_ai_turn(rag_client):
         # 타이핑 인디케이터 on→off 정확히 한 쌍
         assert typing_flags(seen) == [True, False]
 
-        # 접지 칩: found 1회, 근거 메타 포함
+        # 접지 칩 2단: searching(검색 시점) → found(카드 확정 시점, 근거 메타 포함)
         rs = rag_statuses(seen)
-        assert len(rs) == 1 and rs[0]["status"] == "found"
-        assert rs[0]["hits"] >= 1 and rs[0]["sources"]
+        assert [s["status"] for s in rs] == ["searching", "found"]
+        assert rs[1]["hits"] >= 1 and rs[1]["sources"]
 
-        # 부분 순서: rag_status·typing(on) < typing(off) < ai_turn
+        # 전체 순서: searching < typing(on) < found < typing(off) < ai_turn
         i_on = types.index("ai_typing")
         i_off = len(types) - 1 - types[::-1].index("ai_typing")
-        i_rs = types.index("rag_status")
-        assert i_rs < i_off < types.index("ai_turn")
-        assert i_on < i_off
+        i_s = types.index("rag_status")
+        i_f = len(types) - 1 - types[::-1].index("rag_status")
+        assert i_s < i_on < i_f < i_off < types.index("ai_turn")
 
         # 카드 버블은 항상 마지막 요소, 그리고 딱 1장
         assert len(bubbles) >= 2, bubbles
@@ -93,6 +96,27 @@ def test_no_rag_status_on_reject_backchannel_and_embed_failure(rag_client):
         assert rag_statuses(seen) == []
         assert card_bubbles(bubbles) == []
         assert bubbles and bubbles[0]["text"].strip()  # 수다 응답은 정상 생성
+
+
+# ---- 계약 2-보강: 게이트 통과 + 부정 답변(소문성 질문) → searching이 no_match로 해소 ----
+def test_rumor_turn_resolves_searching_to_no_match(rag_client):
+    """실측 사례("매월 100만원씩 지원해주는 정부 지원 있어?"): 어휘·의미 우연으로 게이트는
+    넘지만 LLM이 정직하게 '확인되지 않는다'고 답해 카드가 빠지는 턴(적대 방어) —
+    '찾았어요' 칩이 남아 '없어요' 답변과 모순되지 않아야 한다."""
+    p = rag_client.app.state.providers
+    neg = NegationChatLLM(p.llm)
+    p.llm = neg
+    p.mllm = neg
+    sid = rag_client.post("/api/sessions").json()["session_id"]
+    with rag_client.websocket_connect(f"/ws/{sid}") as ws:
+        handshake(ws)
+        bubbles, seen = user_turn(ws, GROUNDING_Q)  # 목 인덱스에서 게이트 통과가 보장된 질의
+        assert [s["status"] for s in rag_statuses(seen)] == ["searching", "no_match"]
+        assert card_bubbles(bubbles) == []  # 무관 카드 없음 (부정 게이트 — answer.pick_card)
+        assert any("확인되지 않" in b["text"] for b in bubbles)  # 정직한 부정 답변은 그대로
+        # T2 금액 치환도 카드 유무와 일치 — 카드 없는 턴이 '화면 카드'를 가리키면 안 된다
+        assert all("화면 카드" not in b["text"] for b in bubbles)
+        assert any("말씀하신 금액" in b["text"] for b in bubbles)
 
 
 # ---- 계약 3: 스크리닝 턴 — typing/rag_status 없음, chat 미호출, 추출은 스폰됨 ----

@@ -116,6 +116,21 @@ class BoomEmbed:
         raise RuntimeError("embed down (functional test)")
 
 
+class NegationChatLLM:
+    """chat만 '없다' 정직 답변으로 고정, 추출은 원본에 위임 — 게이트는 통과했지만
+    카드가 부정 게이트(answer.pick_card)로 빠지는 소문성 턴을 결정적으로 재현한다."""
+
+    def __init__(self, inner) -> None:
+        self._inner = inner
+
+    async def chat(self, messages, **opts):
+        # 금액을 일부러 되뇐다 — 카드 없는 턴의 T2 치환이 '화면 카드'를 헛가리키지 않는지까지 고정
+        return "그런 매월 100만 원씩 드리는 제도는 자료에서 확인되지 않아요. 대신 도움이 될 만한 게 있는지 같이 찾아볼게요."
+
+    async def extract_json(self, messages, schema):
+        return await self._inner.extract_json(messages, schema)
+
+
 def install_llm_spy(client, extract_delay: float = 0.0) -> SpyLLM:
     p = client.app.state.providers
     spy = SpyLLM(p.llm, extract_delay=extract_delay)
@@ -132,10 +147,11 @@ def install_tts_spy(client) -> SpyTTS:
     return spy
 
 
-# ---------- 소스 수준 계약: rag_status는 'found'만 존재 ----------
-def test_source_contract_rag_status_literal_is_found_only():
-    """서버 코드 어디에도 rag_status 'searching'/'none' 전송 지점이 없어야 한다.
-    (동적 검증은 test_functional_turn_orchestration이 3개 경로로 함께 수행)"""
+# ---------- 소스 수준 계약: rag_status 상태 리터럴은 3종뿐 ----------
+def test_source_contract_rag_status_literals():
+    """rag_status 전송 지점의 상태는 searching(게이트 통과) → found(카드 확정) /
+    no_match(카드 미부착 해소) 3종뿐 — 그 외 리터럴('none' 등) 전송 지점이 없어야 한다.
+    (동적 검증은 test_functional_turn_orchestration이 경로별로 함께 수행)"""
     statuses: list[str] = []
     for p in APP_DIR.rglob("*.py"):
         text = p.read_text(encoding="utf-8")
@@ -143,4 +159,4 @@ def test_source_contract_rag_status_literal_is_found_only():
             window = text[m.start(): m.start() + 250]
             statuses += re.findall(r'"status"\s*:\s*"([a-z_]+)"', window)
     assert statuses, "rag_status 전송 지점을 소스에서 찾지 못함 — 계약 테스트 갱신 필요"
-    assert set(statuses) == {"found"}, statuses
+    assert set(statuses) == {"searching", "found", "no_match"}, statuses
