@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 """보미 프로덕션 검증 배터리.
 
-usage: python bomi_verify.py baseline   (축소 전 — 경량: health + 일반 턴 + RAG 턴)
-       python bomi_verify.py post       (축소 후 — 전체: + 위기/장문/동시부하/재접속 내성)
+usage: python scripts/prod_verify.py baseline   (경량: health + 일반 턴 + RAG 턴)
+       python scripts/prod_verify.py post        (전체: + 위기/장문/동시부하/재접속 내성)
+       임의 label 허용(예: final). 대상은 BOMI_BASE 환경변수로 오버라이드(기본=운영 URL).
 
 결과: 같은 폴더에 verify_<label>.json 저장 + 요약 stdout.
 post 모드는 baseline JSON이 있으면 지연 회귀(p95 ≤ 2.5×, 절대 30s)까지 비교.
@@ -18,7 +19,7 @@ from pathlib import Path
 import httpx
 import websockets
 
-# BOMI_BASE 환경변수로 대상 오버라이드 가능 (예: http://101.79.29.239:8080)
+# BOMI_BASE 환경변수로 대상 오버라이드 가능 (예: http://127.0.0.1:8080 — 로컬)
 BASE = os.environ.get("BOMI_BASE", "https://101.79.26.62.sslip.io")
 WS_BASE = BASE.replace("https://", "wss://").replace("http://", "ws://")
 HERE = Path(__file__).parent

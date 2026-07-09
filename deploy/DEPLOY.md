@@ -1,14 +1,15 @@
 # 공인 배포 런북 (NCP 서버)
 
-> ⚠️ **서브계정 서버 작동 시간제한: 평일 09:00–22:00 / 주말 09:00–18:00.**
-> 이 창 **밖에서는 서버 생성·기동이 막히고(`Temporarily out of service`), 창 밖 시간엔 서버가 자동 정지될 수 있음.**
-> → 24/7 공개는 불가, **낮 시간(창 안) 시연용**. 배포·시연 모두 이 시간대에.
+> ⚠️ **서브계정은 CLI로 서버를 생성할 수 없다** — `createServerInstances`가 시간과 무관하게 항상
+> `Temporarily out of service`를 반환한다. **서버 생성은 콘솔에서만** 가능하고, 생성된 서버는 상시 구동된다
+> (작동 시간제한·자동 정지 없음). 아래 §2의 CLI 스니펫은 파라미터 참고용 — 실제 생성은 콘솔에서 동일 값으로.
 
 ## 이미 만들어 둔(무료·재사용) 리소스
 - VPC `142283` (carecall-vpc, 10.0.0.0/16)
 - 서브넷 `309427` (carecall-bomi, KR-1, 10.0.1.0/24)
 - ACG `365174` (인바운드: 22←내 PC IP, 8080/80/443←전체)
 - 서버이미지 `23214590` (ubuntu-22.04 SVR22, KVM/G3 — 현 프로덕션과 동일), 스펙 `s2-g3a` (2vCPU/8GB)
+- 로그인키 `carecall-key`(pem=`~/.ncloud/carecall-key.pem`) · initScript `180077`(carecall-init) — **이미 존재하므로 §1은 없을 때만 생성**
 
 ## 사전
 - ncloud CLI 인증됨(`~/.ncloud/configure`). PowerShell에서 `$ncloud = "C:\Users\samsung-user\ncloud-cli\CLI_1.1.30_20260625\cli_windows\ncloud.cmd"`
@@ -22,11 +23,11 @@ $init = "mkdir -p /root/.ssh; echo '$pub' >> /root/.ssh/authorized_keys; chmod 7
 $initNo = (& $ncloud vserver createInitScript --regionCode KR --initScriptName carecall-init --initScriptContent $init | ConvertFrom-Json).createInitScriptResponse.initScriptList[0].initScriptNo
 ```
 
-## 2) 서버 생성 (시간창 안에서!)
-> ⚠️ 서브계정은 CLI 생성이 거부될 수 있음(`Temporarily out of service`) — 그 경우 **콘솔에서 동일 파라미터로 생성**.
+## 2) 서버 생성 (콘솔에서 — CLI는 항상 거부됨)
+> ⚠️ CLI `createServerInstances`는 **항상** `Temporarily out of service`로 거부된다 → **콘솔에서 아래 파라미터로 생성**(스니펫은 값 참고용).
 ```powershell
 & $ncloud vserver createServerInstances --regionCode KR --vpcNo 142283 --subnetNo 309427 `
-  --serverImageNo 23214590 --serverSpecCode s2-g3a --serverName carecall-1 `
+  --serverImageNo 23214590 --serverSpecCode s2-g3a --serverName carecall-bomi `
   --loginKeyName carecall-key --initScriptNo $initNo `
   --networkInterfaceList "networkInterfaceOrder='0', subnetNo='309427', accessControlGroupNoList='365174'"
 # RUN 될 때까지 대기(2~4분)
@@ -55,7 +56,7 @@ ssh -i ~/.ssh/carecall_ed25519 -o StrictHostKeyChecking=no root@$IP "echo ok"
 # 서버에 공개 리포 클론
 ssh -i ~/.ssh/carecall_ed25519 root@$IP "git clone https://github.com/wdragon92/carecall-bomi /opt/carecall"
 # .env(키 포함, git 미포함)만 전송
-scp -i ~/.ssh/carecall_ed25519 /c/Users/samsung-user/Desktop/ncloud_project/.env root@$IP:/opt/carecall/.env
+scp -i ~/.ssh/carecall_ed25519 /c/Users/samsung-user/Desktop/ncloud_project/carecall-bomi/.env root@$IP:/opt/carecall/.env
 # 서버 셋업(systemd + Caddy HTTPS)
 ssh -i ~/.ssh/carecall_ed25519 root@$IP "APP_PUBLIC_IP=$IP bash /opt/carecall/deploy/server_setup.sh"
 ```

@@ -101,7 +101,7 @@ python run.py
 | 서비스 | 상태 | 비고 |
 |--------|------|------|
 | CLOVA Studio (LLM) | ✅ | 채팅 HCX-005 / 분석 HCX-007 |
-| CLOVA 임베딩 v2 | ✅ | bge-m3 1024d, 실 인덱스 557청크 |
+| CLOVA 임베딩 v2 | ✅ | bge-m3 1024d, 실 인덱스 347청크(어르신 필터 후; 필터 전 557) |
 | CLOVA Speech (STT) | ✅ | TTS→STT 왕복 전사 정확 + 브라우저 실시간 자막 미리보기 |
 | CLOVA Voice (TTS) | ✅ | vgoeun, 속도 -2, "잘 안 ~" 낭독 페이싱 보정 |
 | CLOVA OCR | ✅ | General 도메인 신규 APIGW 연동(2026-07-07). 실 이미지→한글 추출→문서 카드 전 구간 검증 |
@@ -110,7 +110,7 @@ python run.py
 ## 테스트
 
 ```powershell
-.venv\Scripts\python -m pytest    # MOCK_MODE 강제, 네트워크 불필요 (53개)
+.venv\Scripts\python -m pytest    # MOCK_MODE 강제, 네트워크 불필요 (180개)
 ```
 세션 격리 · 특이사항 · 안전 연계(119/109 분리) · RAG(빌드/증분/게이트/카드/적대 방어) · 룰엔진 · OCR 문서카드 · 리포트 커버.
 
@@ -130,13 +130,14 @@ python run.py
 - 코드 갱신: `git pull && pip install -r requirements.txt -q && systemctl restart carecall`
 - 인덱스만 갱신(무중단): `build_index.py --source all` → `POST /api/rag/reload`
 
-> ⚠️ 이 서브계정은 **서버 작동 시간제한(평일 09–22시 / 주말 09–18시)** 이 있어 그 밖 시간엔 생성·기동이 막히거나
-> 자동 정지될 수 있다. 낮 시간 시연용으로 운용.
+> ⚠️ 이 서브계정은 **CLI로 서버를 생성할 수 없다**(`createServerInstances`가 시간과 무관하게 항상
+> `Temporarily out of service`) — 서버 생성은 **콘솔에서만**. 생성된 서버는 상시 구동(작동 시간제한·자동 정지 없음).
 
 ## 문서
 
 - [docs/돌봄콜_RAG_파이프라인_계획_v2.md](docs/돌봄콜_RAG_파이프라인_계획_v2.md) — RAG 설계 스펙(정확도 3계층·갱신 전략·룰엔진)
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — 실행 설계서(전체 구조·결정)
-- [docs/DEMO_SCENARIO.md](docs/DEMO_SCENARIO.md) — 발표용 시연 대본
+- [docs/DEMO_SCENARIO.md](docs/DEMO_SCENARIO.md) — 발표용 시연 대본 / [docs/발표_스크립트.md](docs/발표_스크립트.md) — 발표 진행 대본
+- [docs/bomi-persona.md](docs/bomi-persona.md) · [docs/user-persona.md](docs/user-persona.md) — 페르소나(보미 / 사용자)
 - [deploy/DEPLOY.md](deploy/DEPLOY.md) — 공인 배포 런북 / [TEARDOWN.md](TEARDOWN.md) — 철수 체크리스트
-- [claude-code-prompt.md](docs/claude-code-prompt.md) — 원본 요구사항
+- [docs/claude-code-prompt.md](docs/claude-code-prompt.md) — 원본 요구사항

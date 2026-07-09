@@ -28,14 +28,14 @@
    └─ knowledge/welfare.json (복지 grounding, 정적 파일)
 ```
 
-- **배포 = 로컬 실행 데모.** NCP 인프라(서버·VPC·스토리지) 프로비저닝 없음 → 철수는 `TEARDOWN.md` 체크리스트로 끝.
+- **기본 실행 = 로컬 데모.** 단, 공개 시연용 NCP 서버가 별도 프로비저닝돼 있다(서버 142948660 carecall-bomi·VPC 142283·서브넷 309427·ACG 365174·공인IP 101.79.26.62 — `deploy/DEPLOY.md`, 철수는 `TEARDOWN.md`). 로컬만 쓰면 프로비저닝 불필요.
 - NCP 의존 = 외부 API 호출 4종뿐. 키가 없거나 실패하면 provider 단위로 mock 폴백.
 - DB 없음. 대화·특이사항은 세션 메모리에만 (요구사항 가드레일 4: 영구 저장 금지).
 
 ## 2. 디렉토리 구조
 
 ```
-ncloud_project/
+carecall-bomi/          # (설계 시점 발췌 — 실제 트리엔 app/rag/, scripts/, deploy/ 등이 추가됨)
 ├── app/
 │   ├── main.py              # FastAPI 앱 생성, lifespan(세션 TTL 스위퍼), 라우터/정적 마운트
 │   ├── config.py            # pydantic-settings로 .env 로딩, MOCK_MODE·provider별 키 존재 판정
@@ -78,7 +78,7 @@ ncloud_project/
 |---|---|---|
 | Python 실행 | `python -m venv .venv` + `requirements.txt`(하한 핀 `>=`) | Python 3.14라 최신 휠 필요. 설치 실패 시 해당 패키지만 버전 조정 |
 | 의존성 | fastapi, uvicorn[standard], httpx, pydantic-settings, python-multipart, pytest, pytest-asyncio | 최소 구성. DB/ORM/프론트 빌드도구 없음 |
-| LLM 채팅 | HyperCLOVA X 최상위 (기본 후보 **HCX-007**) 스트리밍 | 지연 크면 채팅만 HCX-005(또는 DASH 계열)로 낮추고 추출은 상위 유지 [문서확인] |
+| LLM 채팅 | **HCX-005 확정** 스트리밍 (설계 초안은 HCX-007 후보였으나 지연·빈응답으로 채팅은 005 확정) | 분석/추출은 HCX-007 유지 |
 | LLM 추출 | Structured Output(JSON Schema) 시도 → 모델 제약으로 불가 시 "JSON만 출력" 프롬프트 + 견고 파서(코드펜스 제거→json.loads→1회 재시도) | 요구사항 문서가 경고한 기능조합 제약 대응 |
 | STT | **CSR(짧은 문장 인식)** — 푸시투토크 턴 단위에 적합 | 장문 CLOVA Speech(도메인 빌더)는 대안. 계정에서 CSR 불가 시에만 전환 |
 | 오디오 포맷 | **브라우저에서 PCM 캡처 → JS로 WAV(16kHz mono 16bit) 인코딩 → 업로드** | MediaRecorder webm은 CSR 미지원 위험. WAV면 서버 트랜스코딩(ffmpeg) 불필요 → 로컬 의존성 zero |
