@@ -110,7 +110,7 @@ python run.py
 ## 테스트
 
 ```powershell
-.venv\Scripts\python -m pytest    # MOCK_MODE 강제, 네트워크 불필요 (180개)
+.venv\Scripts\python -m pytest    # MOCK_MODE 강제, 네트워크 불필요 (184개)
 ```
 세션 격리 · 특이사항 · 안전 연계(119/109 분리) · RAG(빌드/증분/게이트/카드/적대 방어) · 룰엔진 · OCR 문서카드 · 리포트 커버.
 
