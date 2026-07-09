@@ -6,9 +6,9 @@
 
 ## 이미 만들어 둔(무료·재사용) 리소스
 - VPC `142283` (carecall-vpc, 10.0.0.0/16)
-- 서브넷 `308551` (KR-2, 10.0.1.0/24), `308554` (KR-1, 예비)
+- 서브넷 `309427` (carecall-bomi, KR-1, 10.0.1.0/24)
 - ACG `365174` (인바운드: 22←내 PC IP, 8080/80/443←전체)
-- 서버이미지 `104630229` (ubuntu-24.04-base, KVM/G3), 스펙 `c2-g3` (2vCPU/4GB)
+- 서버이미지 `23214590` (ubuntu-22.04 SVR22, KVM/G3 — 현 프로덕션과 동일), 스펙 `s2-g3a` (2vCPU/8GB)
 
 ## 사전
 - ncloud CLI 인증됨(`~/.ncloud/configure`). PowerShell에서 `$ncloud = "C:\Users\samsung-user\ncloud-cli\CLI_1.1.30_20260625\cli_windows\ncloud.cmd"`
@@ -23,11 +23,12 @@ $initNo = (& $ncloud vserver createInitScript --regionCode KR --initScriptName c
 ```
 
 ## 2) 서버 생성 (시간창 안에서!)
+> ⚠️ 서브계정은 CLI 생성이 거부될 수 있음(`Temporarily out of service`) — 그 경우 **콘솔에서 동일 파라미터로 생성**.
 ```powershell
-& $ncloud vserver createServerInstances --regionCode KR --vpcNo 142283 --subnetNo 308551 `
-  --serverImageNo 104630229 --serverSpecCode c2-g3 --serverName carecall-1 `
+& $ncloud vserver createServerInstances --regionCode KR --vpcNo 142283 --subnetNo 309427 `
+  --serverImageNo 23214590 --serverSpecCode s2-g3a --serverName carecall-1 `
   --loginKeyName carecall-key --initScriptNo $initNo `
-  --networkInterfaceList "networkInterfaceOrder='0', subnetNo='308551', accessControlGroupNoList='365174'"
+  --networkInterfaceList "networkInterfaceOrder='0', subnetNo='309427', accessControlGroupNoList='365174'"
 # RUN 될 때까지 대기(2~4분)
 do { Start-Sleep 15; $s=(& $ncloud vserver getServerInstanceList --regionCode KR --vpcNo 142283 | ConvertFrom-Json).getServerInstanceListResponse.serverInstanceList[0]; $s.serverInstanceStatus.code } while ($s.serverInstanceStatus.code -ne "RUN")
 $serverNo = $s.serverInstanceNo
@@ -52,7 +53,7 @@ $myip = (Invoke-RestMethod https://api.ipify.org)
 # (PC, Git Bash) SSH 접속 확인
 ssh -i ~/.ssh/carecall_ed25519 -o StrictHostKeyChecking=no root@$IP "echo ok"
 # 서버에 공개 리포 클론
-ssh -i ~/.ssh/carecall_ed25519 root@$IP "git clone https://github.com/wdragon92/carecall-ai /opt/carecall"
+ssh -i ~/.ssh/carecall_ed25519 root@$IP "git clone https://github.com/wdragon92/carecall-bomi /opt/carecall"
 # .env(키 포함, git 미포함)만 전송
 scp -i ~/.ssh/carecall_ed25519 /c/Users/samsung-user/Desktop/ncloud_project/.env root@$IP:/opt/carecall/.env
 # 서버 셋업(systemd + Caddy HTTPS)

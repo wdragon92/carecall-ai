@@ -139,4 +139,4 @@ python run.py
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — 실행 설계서(전체 구조·결정)
 - [docs/DEMO_SCENARIO.md](docs/DEMO_SCENARIO.md) — 발표용 시연 대본
 - [deploy/DEPLOY.md](deploy/DEPLOY.md) — 공인 배포 런북 / [TEARDOWN.md](TEARDOWN.md) — 철수 체크리스트
-- [care-call-ai-claude-code-prompt.md](care-call-ai-claude-code-prompt.md) — 원본 요구사항
+- [claude-code-prompt.md](docs/claude-code-prompt.md) — 원본 요구사항

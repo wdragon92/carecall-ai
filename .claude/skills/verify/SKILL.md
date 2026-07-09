@@ -1,9 +1,9 @@
 ---
 name: verify
-description: carecall-ai 변경을 실 서버로 종단 검증하는 레시피 — 서버 기동 → WS 대화 주입 → 메시지 시퀀스 관찰
+description: carecall-bomi 변경을 실 서버로 종단 검증하는 레시피 — 서버 기동 → WS 대화 주입 → 메시지 시퀀스 관찰
 ---
 
-# carecall-ai 종단 검증 레시피
+# carecall-bomi 종단 검증 레시피
 
 표면: FastAPI + WebSocket(`/ws/{session_id}`). 프런트(app.js)는 WS 메시지를 그대로 렌더하므로
 **WS 시퀀스 관찰이 곧 UI 계약 검증**이다.

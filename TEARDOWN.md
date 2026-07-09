@@ -21,7 +21,7 @@
 
 **무료 리소스 (선택 — 남겨도 과금 0. 재배포 예정이면 유지 권장):**
 - [ ] 로그인키/init스크립트: `deleteLoginKeys --keyNameList carecall-key`, `deleteInitScripts --initScriptNoList <no>`
-- [ ] 서브넷(308551/308554)·VPC(142283)·ACG(365174): 콘솔에서 삭제하거나 유지. (서버 반납 후에만 서브넷→VPC 순으로 삭제 가능)
+- [ ] 서브넷(309427 carecall-bomi)·VPC(142283)·ACG(365174): 콘솔에서 삭제하거나 유지. (서버 반납 후에만 서브넷→VPC 순으로 삭제 가능)
 
 ## 1. CLOVA API 키 정리 (콘솔)
 - [ ] **CLOVA OCR**: 생성한 도메인 삭제
@@ -39,7 +39,7 @@
   ```
 - [ ] 프로젝트 `.env` 삭제, `Remove-Item -Recurse -Force "$HOME\.ncloud"` (configure·PEM 제거), `~/.ssh/carecall_ed25519*` 삭제
 - [ ] 방화벽 규칙 제거: `netsh advfirewall firewall delete rule name="carecall-8080"` (관리자 권한)
-- [ ] GitHub 리포(`wdragon92/carecall-ai`)는 보관/삭제 자유
+- [ ] GitHub 리포(`wdragon92/carecall-bomi`)는 보관/삭제 자유
 
 ## 참고
 - 로컬 전역 변경: PATH 1개 + ncloud-cli 폴더 + 방화벽 규칙 1개. Python venv·의존성은 프로젝트 `.venv/`에만.

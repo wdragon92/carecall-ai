@@ -1,6 +1,6 @@
 # 돌봄콜 AI — 실행 설계서 (Architecture & Execution Blueprint)
 
-> **이 문서의 역할**: `care-call-ai-claude-code-prompt.md`(이하 "요구사항 문서")가 *무엇을* 만들지 정의하고,
+> **이 문서의 역할**: `docs/claude-code-prompt.md`(이하 "요구사항 문서")가 *무엇을* 만들지 정의하고,
 > 본 문서는 *어떻게* 만들지의 결정을 전부 내려둔 실행 설계서다.
 > **충돌 시**: 요구사항(무엇)은 요구사항 문서가 우선, 구현 결정(어떻게)은 본 문서가 우선.
 >
@@ -65,8 +65,8 @@ ncloud_project/
 ├── tests/                   # pytest (MOCK_MODE 강제, §12)
 ├── docs/
 │   ├── ARCHITECTURE.md      # 본 문서
-│   └── DEMO_SCENARIO.md     # 7단계에서 작성 (발표용 시나리오 대본)
-├── care-call-ai-claude-code-prompt.md   # 요구사항 문서 (원본 유지)
+│   ├── DEMO_SCENARIO.md     # 7단계에서 작성 (발표용 시나리오 대본)
+│   └── claude-code-prompt.md  # 요구사항 문서 (원본 유지)
 ├── requirements.txt
 ├── run.py                   # uvicorn 실행 편의 스크립트 (host/port는 .env)
 ├── .env.example / .env(미커밋) / .gitignore / README.md / TEARDOWN.md
