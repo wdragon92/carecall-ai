@@ -22,6 +22,19 @@ def test_scan_direct_suicide_is_acute():
     assert "suicide_acute" in _kinds("어르신: 다 그만두고 죽고 싶어요")
 
 
+def test_scan_euphemistic_dialect_suicide_is_warning():
+    # 레드팀 실측: 완곡·사투리 수동적 자살신호가 결정망을 회피하던 공백 보강
+    assert "suicide_warning" in _kinds("어르신: 마 인자 고마 사는 게 다 의미가 없다카이")
+    assert "suicide_warning" in _kinds("어르신: 밤에 눈 감으면 그냥 안 깼으면 싶어")
+    assert "suicide_warning" in _kinds("어르신: 사는 게 무의미해요")
+    assert safety.alert(_kinds("어르신: 사는 게 다 의미가 없다카이"))[0] == "warning"
+
+
+def test_scan_meaningless_task_no_false_positive():
+    # 삶이 아니라 '일/얘기'가 의미없다는 건 자살신호가 아님(과탐 방지)
+    assert "suicide_warning" not in _kinds("어르신: 그 얘기는 이제 의미가 없어요")
+
+
 def test_scan_negation_no_false_positive():
     k = _kinds("어르신: 가슴이 답답하진 않아요. 죽고 싶지 않아요")
     assert "medical_soon" not in k
@@ -83,3 +96,26 @@ def test_ws_direct_suicide_emergency(client):
         ws.send_json({"type": "user_message", "text": "다 그만두고 죽고 싶어요"})
         alert, _ = _drain_until(ws, lambda m: m.get("type") == "urgent_alert")
         assert alert is not None and alert["level"] == "emergency"
+
+
+def test_ws_euphemistic_suicide_warning(client):
+    # P1: 완곡·사투리 수동적 자살신호도 실시간 경보 배너가 떠야 한다
+    sid = client.post("/api/sessions").json()["session_id"]
+    with client.websocket_connect(f"/ws/{sid}") as ws:
+        ws.send_json({"type": "user_message", "text": "마 인자 고마 사는 게 다 의미가 없다카이"})
+        alert, _ = _drain_until(ws, lambda m: m.get("type") == "urgent_alert")
+        assert alert is not None and alert["level"] == "warning"
+
+
+def test_crisis_hold_persists_after_euphemistic_suicide():
+    # P1 핵심: 완곡 자살신호 뒤 '해본 소리' 회피 턴에도 위기 수위 2턴 유지 → 저녁수다 이탈 방지
+    from types import SimpleNamespace
+
+    from app.core import conversation
+
+    sess = SimpleNamespace(crisis_hold=None)
+    _, level1, _ = conversation._resolve_signal(sess, "사는 게 다 의미가 없다카이", False)
+    assert level1 == "suicide"
+    assert sess.crisis_hold == ("suicide", 2)
+    _, level2, _ = conversation._resolve_signal(sess, "아이다 마, 그냥 해본 소리다", False)
+    assert level2 == "suicide"  # 새 신호가 없어도 직전 위기가 유지됨
