@@ -113,3 +113,55 @@ def test_ws_user_message_nfc_normalized(client, app, monkeypatch):
     sess = app.state.store.get(sid)
     user_texts = [m.text for m in sess.messages if m.role == "user"]
     assert user_texts == [unicodedata.normalize("NFC", nfd)]
+
+
+# ---- WS-BUSYLOOP: 끊긴 소켓에서 receive가 WebSocketDisconnect가 아니라 RuntimeError로
+#      나는 비정상 종료 경로에서, '잘못된 프레임'으로 오판해 무한 재수신(이벤트 루프 점유)에
+#      빠지지 않아야 한다. (프로덕션 재접속/churn 부하에서 실측된 busy-loop 회귀) ----
+def test_ws_recv_error_on_disconnected_socket_does_not_busyloop():
+    from types import SimpleNamespace
+
+    from starlette.websockets import WebSocketState
+
+    from app.routes.ws import ws_endpoint
+
+    async def scenario():
+        store = SessionStore()
+        sess = await store.create()
+        sess.add_message("user", "이미 진행된 세션")  # 비어있지 않음 → greet(sleep) 스킵
+        fake_app = SimpleNamespace(state=SimpleNamespace(
+            store=store,
+            providers=SimpleNamespace(modes={}),         # session_ready에만 사용
+            settings=SimpleNamespace(greet_delay_seconds=0.0),
+        ))
+
+        class FakeWS:
+            """끊긴 뒤 receive가 RuntimeError를 내는 소켓(정상 종료는 WebSocketDisconnect)."""
+
+            def __init__(self):
+                self.app = fake_app
+                self.client_state = WebSocketState.CONNECTED
+                self.calls = 0
+
+            async def accept(self):
+                pass
+
+            async def send_json(self, _payload):
+                pass
+
+            async def receive_json(self):
+                self.calls += 1
+                self.client_state = WebSocketState.DISCONNECTED  # 소켓은 이미 끊김
+                raise RuntimeError('WebSocket is not connected. Need to call "accept" first.')
+
+            async def close(self):
+                pass
+
+        fws = FakeWS()
+        # 수정 전이라면 continue로 무한 재수신 → wait_for 타임아웃(TimeoutError)로 실패한다.
+        await asyncio.wait_for(ws_endpoint(fws, sess.id), timeout=3.0)
+        return sess, fws
+
+    sess, fws = asyncio.run(scenario())
+    assert fws.calls == 1        # 1회 시도 후 즉시 종료(무한 재시도 아님)
+    assert sess.ws is None       # finally 정리로 stale 소켓 참조 해제

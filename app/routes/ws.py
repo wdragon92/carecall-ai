@@ -6,6 +6,7 @@ import logging
 import unicodedata
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from starlette.websockets import WebSocketState
 
 from app.core import conversation
 
@@ -47,7 +48,15 @@ async def ws_endpoint(websocket: WebSocket, session_id: str) -> None:
                 data = await websocket.receive_json()
             except WebSocketDisconnect:
                 raise
-            except Exception as exc:  # noqa: BLE001 — 비-JSON 등 잘못된 프레임: 수신 지속
+            except Exception as exc:  # noqa: BLE001
+                # 살아있는 소켓의 '잘못된 프레임'(비-JSON 등)만 무시하고 계속한다.
+                # 소켓이 이미 끊김/종료 중이면 재수신해도 같은 예외가 영구 반복되어
+                # 이벤트 루프를 점유하는 busy-loop이 된다(실측: receive가 WebSocketDisconnect가
+                # 아니라 RuntimeError('WebSocket is not connected')로 나는 비정상 종료 경로).
+                # 따라서 CONNECTED가 아니면 잘못된 프레임이 아니라 종료로 보고 루프를 끝낸다.
+                if websocket.client_state != WebSocketState.CONNECTED:
+                    log.info("ws recv on %s → close: %s", websocket.client_state.name, session_id)
+                    break
                 log.warning("ws bad frame ignored: %s", exc)
                 continue
             if not isinstance(data, dict):  # 배열·문자열 등 비-dict 프레임 방어
@@ -69,9 +78,15 @@ async def ws_endpoint(websocket: WebSocket, session_id: str) -> None:
                         {"type": "error", "code": "internal", "message": "일시적인 오류가 있었어요."}
                     )
     except WebSocketDisconnect:
-        if sess.ws is websocket:
-            sess.ws = None
         log.info("ws disconnected: %s", session_id)
     except Exception as exc:  # noqa: BLE001 — 최후 안전망(세션은 절대 죽이지 않음)
         log.exception("ws error: %s", exc)
-        await sess.send({"type": "error", "code": "internal", "message": "일시적인 오류가 있었어요."})
+        try:
+            await sess.send({"type": "error", "code": "internal", "message": "일시적인 오류가 있었어요."})
+        except Exception:  # noqa: BLE001 — 이미 끊긴 소켓엔 전송 불가, 무시
+            pass
+    finally:
+        # 정상 끊김·busy-loop 차단 break·예외 어느 경로로 빠져나오든 세션의 소켓 참조를
+        # 반드시 해제(다음 재접속이 stale 소켓으로 send하지 않도록).
+        if sess.ws is websocket:
+            sess.ws = None
